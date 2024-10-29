@@ -4,17 +4,20 @@
 #include <zephyr/sys/reboot.h>
 #include <zephyr/types.h>
 
-#include "display_switches.h"
+#include "display/display_switches.h"
 #include "external_rtc.h"
-#include "light_sensor.h"
-#include "lte_manager.h"
-#include "pwm_leds.h"
+#include "net/lte_manager.h"
 #include "update_stop.h"
 #include "watchdog_app.h"
 
+#ifdef CONFIG_LIGHT_SENSOR
+#include "display/pwm_leds.h"
+#include "light_sensor.h"
+#endif  // CONFIG_LIGHT_SENSOR
+
 #ifdef CONFIG_BOOTLOADER_MCUBOOT
-#include "fota.h"
-#endif
+#include "net/fota.h"
+#endif  // CONFIG_BOOTLOADER_MCUBOOT
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
@@ -114,33 +117,34 @@ end:
 
 #else
 int main(void) {
-  int err;
-  int lux;
+  int ret;
   int wdt_channel_id = -1;
 
-  err = init_display_switches();
-  if (err < 0) {
-    LOG_ERR("Failed to initialize display switches. Err: %d", err);
+  ret = init_display_switches();
+  if (ret < 0) {
+    LOG_ERR("Failed to initialize display switches. Err: %d", ret);
     goto reset;
   }
 
   // Set all displays off because the LEDs have memory
   for (size_t box = 0; box < NUMBER_OF_DISPLAY_BOXES; box++) {
-    err = display_off(box);
-    if (err < 0) {
+    ret = display_off(box);
+    if (ret < 0) {
       LOG_ERR("Failed to set display switch %d off.", box);
     }
   }
 
-  lux = get_lux();
+#ifdef CONFIG_LIGHT_SENSOR
+  int lux = get_lux();
   if (lux < 0) {
     goto reset;
   }
 
-  err = pwm_leds_set((uint32_t)lux);
-  if (err) {
+  ret = pwm_leds_set((uint32_t)lux);
+  if (ret) {
     goto reset;
   }
+#endif  // CONFIG_LIGHT_SENSOR
 
   (void)log_reset_reason();
 
@@ -154,20 +158,20 @@ int main(void) {
     goto reset;
   }
 
-  err = wdt_feed(wdt, wdt_channel_id);
-  if (err) {
-    LOG_ERR("Failed to feed watchdog. Err: %d", err);
+  ret = wdt_feed(wdt, wdt_channel_id);
+  if (ret) {
+    LOG_ERR("Failed to feed watchdog. Err: %d", ret);
     goto reset;
   }
 
-  err = lte_connect();
-  if (err) {
+  ret = lte_connect();
+  if (ret) {
     goto reset;
   }
 
   if (k_sem_take(&lte_connected_sem, K_FOREVER) == 0) {
-    err = set_external_rtc_time();
-    if (err) {
+    ret = set_external_rtc_time();
+    if (ret) {
       LOG_ERR("Failed to set rtc.");
       goto reset;
     }
@@ -177,9 +181,9 @@ int main(void) {
   }
   k_sem_give(&lte_connected_sem);
 
-  err = wdt_feed(wdt, wdt_channel_id);
-  if (err) {
-    LOG_ERR("Failed to feed watchdog. Err: %d", err);
+  ret = wdt_feed(wdt, wdt_channel_id);
+  if (ret) {
+    LOG_ERR("Failed to feed watchdog. Err: %d", ret);
     goto reset;
   }
 
@@ -191,29 +195,33 @@ int main(void) {
 
   while (1) {
     if (k_sem_take(&stop_sem, K_NO_WAIT) == 0) {
-      err = wdt_feed(wdt, wdt_channel_id);
-      if (err) {
-        LOG_ERR("Failed to feed watchdog. Err: %d", err);
+
+#ifdef CONFIG_LIGHT_SENSOR
+      ret = update_stop();
+      if (ret == 0) {
+        lux = get_lux();
+        if (lux < 0) {
+          goto reset;
+        }
+      } else if (ret == 2) {
+        lux = 0xFF;
+      } else {
         goto reset;
       }
 
+      ret = pwm_leds_set((uint32_t)lux);
+      if (ret) {
+        goto reset;
+      }
+#else
       if (update_stop()) {
         goto reset;
       }
+#endif  // CONFIG_LIGHT_SENSOR
 
-      int lux = get_lux();
-      if (lux < 0) {
-        goto reset;
-      }
-
-      err = pwm_leds_set((uint32_t)lux);
-      if (err) {
-        goto reset;
-      }
-
-      err = wdt_feed(wdt, wdt_channel_id);
-      if (err) {
-        LOG_ERR("Failed to feed watchdog. Err: %d", err);
+      ret = wdt_feed(wdt, wdt_channel_id);
+      if (ret) {
+        LOG_ERR("Failed to feed watchdog. Err: %d", ret);
         goto reset;
       }
     }
@@ -226,15 +234,15 @@ reset:
 #ifdef CONFIG_DEBUG
   LOG_WRN("Reached end of main; waiting for manual reset.");
   while (1) {
-    err = wdt_feed(wdt, wdt_channel_id);
-    if (err) {
-      LOG_ERR("Failed to feed watchdog. Err: %d", err);
+    ret = wdt_feed(wdt, wdt_channel_id);
+    if (ret) {
+      LOG_ERR("Failed to feed watchdog. Err: %d", ret);
     }
     k_msleep(29000);
   }
 #else
-  LOG_WRN("Reached end of main; rebooting.");
-  /* In ARM implementation sys_reboot ignores the parameter */
+  LOG_ERR("Reached end of main; rebooting.");
+  /* The ARM implementation sys_reboot ignores the parameter */
   sys_reboot(SYS_REBOOT_COLD);
 #endif
 }

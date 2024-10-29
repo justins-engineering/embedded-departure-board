@@ -10,8 +10,9 @@
 #include <zephyr/net/tls_credentials.h>
 #include <zephyr/storage/stream_flash.h>
 
-#include "fota.h"
-#include "lte_manager.h"
+#include "net/fota.h"
+#include "net/lte_manager.h"
+#include "watchdog_app.h"
 
 LOG_MODULE_REGISTER(custom_http_client, LOG_LEVEL_INF);
 
@@ -52,7 +53,7 @@ int tls_setup(int fd, char *hostname, sec_tag_t sec_tag) {
     return err;
   }
 
-  return 0;
+  return EXIT_SUCCESS;
 }
 
 static int parse_status(char *headers_buf) {
@@ -215,7 +216,7 @@ static long parse_response(
     *(recv_body_buf + recv_body_buf_size - 1) = '\0';
   }
 
-  return 0;
+  return EXIT_SUCCESS;
 }
 
 static char *get_redirect_location(char *headers_buf, int headers_buf_size) {
@@ -268,6 +269,12 @@ static int send_http_request(
   LOG_DBG("SEC_TAG: %d", sec_tag);
 
 retry:
+  err = wdt_feed(wdt, wdt_channel_id);
+  if (err) {
+    LOG_ERR("Failed to feed watchdog. Err: %d", err);
+    return EXIT_FAILURE;
+  }
+
   ptr = stpcpy(&headers_buf[0], "GET ");
   ptr = stpcpy(ptr, path);
   ptr = stpcpy(ptr, " HTTP/1.1\r\n");
@@ -400,49 +407,61 @@ clean_up:
     goto retry;
   } else if ((rc == -3) && (retry_client_error == 0)) {
     // The InfoPoint endpoint occasionally returns 404; retry once
+    LOG_WRN("GET request failed once, retrying...");
     retry_client_error = 1;
     goto retry;
   }
 
-  return 0;
+  return EXIT_SUCCESS;
 
 redirect:
   ptr = get_redirect_location(headers_buf, headers_buf_size);
   char redirect_hostname_buf[255];
   LOG_INF("Redirect location: %s", ptr);
 
-  /* Assume the host is the same */
-  if (*ptr == '/') {
-    path = strcpy(redirect_hostname_buf, ptr);
-    LOG_DBG("path ptr: %s", path);
-    /* Assume we're dealing with a url */
-  } else if (*ptr == 'h') {
-    if (strncmp(ptr, "https", 5) == 0) {
-      if (sec_tag == NO_SEC_TAG) {
-        LOG_ERR(
-            "Redirect requires TLS, but a TLS sec_tag was assigned. Assign "
-            "correct sec_tag in the code "
-            "Aborting."
-        );
-        return 1;
-      }
-      ptr += 8;
-    } else {
-      ptr += 7;
-      sec_tag = NO_SEC_TAG;
-    }
-    hostname = ptr;
-    ptr = strstr(ptr, "/");
-    *ptr++ = '\0';
-
-    path = stpcpy(redirect_hostname_buf, hostname);
-    *++path = '/';
-
-    (void)strcpy((path + 1), ptr);
-    hostname = redirect_hostname_buf;
+  if (ptr == NULL) {
+    LOG_ERR("get_redirect_location returned NULL pointer");
+    return EXIT_FAILURE;
   } else {
-    LOG_ERR("Bad redirect location");
-    return 1;
+    /* Assume the host is the same */
+    if (*ptr == '/') {
+      path = strcpy(redirect_hostname_buf, ptr);
+      LOG_DBG("path ptr: %s", path);
+      /* Assume we're dealing with a url */
+    } else if (*ptr == 'h') {
+      if (strncmp(ptr, "https", 5) == 0) {
+        if (sec_tag == NO_SEC_TAG) {
+          LOG_ERR(
+              "Redirect requires TLS, but a TLS sec_tag was assigned. Assign "
+              "correct sec_tag in the code "
+              "Aborting."
+          );
+          return EXIT_FAILURE;
+        }
+        ptr += 8;
+      } else {
+        ptr += 7;
+        sec_tag = NO_SEC_TAG;
+      }
+      hostname = ptr;
+      ptr = strstr(ptr, "/");
+
+      if (ptr == NULL) {
+        LOG_ERR("strstr returned NULL pointer");
+        return EXIT_FAILURE;
+      } else {
+        *ptr++ = '\0';
+
+        path = stpcpy(redirect_hostname_buf, hostname);
+        *++path = '/';
+
+        (void)strcpy((path + 1), ptr);
+        hostname = redirect_hostname_buf;
+      }
+    } else {
+      LOG_ERR("Bad redirect location");
+      return EXIT_FAILURE;
+    }
   }
 
   goto retry;
