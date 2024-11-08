@@ -83,7 +83,7 @@ void log_reset_reason(void) {
 }
 
 #ifdef CONFIG_LED_DISPLAY_TEST
-#include "led_display.h"
+#include "display/led_display.h"
 
 int main(void) {
   int err = init_display_switches();
@@ -92,10 +92,12 @@ int main(void) {
     goto end;
   }
 
+#ifdef CONFIG_LIGHT_SENSOR
   err = pwm_leds_test();
   if (err) {
     goto end;
   }
+#endif  // CONFIG_LIGHT_SENSOR
 
   while (1) {
     err = led_test_patern();
@@ -195,7 +197,9 @@ int main(void) {
 
   while (1) {
     if (k_sem_take(&stop_sem, K_NO_WAIT) == 0) {
-
+      /* A returned 2 corresponds to a successful response with no scheduled
+       * departures.
+       */
 #ifdef CONFIG_LIGHT_SENSOR
       ret = update_stop();
       if (ret == 0) {
@@ -214,7 +218,8 @@ int main(void) {
         goto reset;
       }
 #else
-      if (update_stop()) {
+      ret = update_stop();
+      if (ret && (ret != 2)) {
         goto reset;
       }
 #endif  // CONFIG_LIGHT_SENSOR
