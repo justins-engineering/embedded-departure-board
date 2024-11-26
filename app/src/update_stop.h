@@ -4,16 +4,14 @@
 #include <zephyr/kernel.h>
 
 /** Specify the number of display boxes connected*/
-#define NUMBER_OF_DISPLAY_BOXES 5
+#define NUMBER_OF_DISPLAY_BOXES 3
 
 /** Specify the route, display text, and position for each display box */
 // clang-format off
 #define DISPLAY_BOXES {                                                                         \
-  { .id = 30038, .position = 0, .direction_code = 'S', .color = 0x660066, .brightness = 0xFF }, \
-  { .id = 10043, .position = 1, .direction_code = 'E', .color = 0x003366, .brightness = 0xFF }, \
-  { .id = 10043, .position = 2, .direction_code = 'W', .color = 0x003366, .brightness = 0xFF }, \
-  { .id = 10943, .position = 3, .direction_code = 'W', .color = 0x003366, .brightness = 0xFF }, \
-  { .id = 20029, .position = 4, .direction_code = 'S', .color = 0xFF0000, .brightness = 0x3C }  \
+  { .id = 20001, .position = 0, .direction_code = 'N', .color = 0x009933, .brightness = 0xC2 }, \
+  { .id = 20002, .position = 1, .direction_code = 'N', .color = 0x009933, .brightness = 0xC2 }, \
+  { .id = 20092, .position = 2, .direction_code = 'S', .color = 0xFFFFFF, .brightness = 0x26 }  \
 }
 // clang-format on
 
