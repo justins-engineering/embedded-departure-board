@@ -7,7 +7,6 @@
 
 #define JSMN_HEADER
 
-#include "external_rtc.h"
 #include "json/jsmn.h"
 #include "json/json_helpers.h"
 #include "stop.h"
@@ -18,8 +17,8 @@ LOG_MODULE_REGISTER(jsmn_parse);
 #define DEPARTURE_TOK_COUNT 18
 #define HEADWAY_TOK_COUNT 14
 #define ROUTE_DIRECTION_TOK_COUNT \
-  (12 + (MAX_DEPARTURES * (DEPARTURE_TOK_COUNT + HEADWAY_TOK_COUNT)))
-#define STOP_TOK_COUNT (6 + (MAX_ROUTES * ROUTE_DIRECTION_TOK_COUNT))
+  (12 + (CONFIG_ROUTE_MAX_DEPARTURES * (DEPARTURE_TOK_COUNT + HEADWAY_TOK_COUNT)))
+#define STOP_TOK_COUNT (6 + (CONFIG_STOP_MAX_ROUTES * ROUTE_DIRECTION_TOK_COUNT))
 
 /** With jsmn JSON objects count as a token, so we need to offset by an
  *  additional 1 for each level deeper we go.
@@ -245,7 +244,9 @@ static int parse_route_directions(
  *
  * TODO: Acount for size of *optional* arrays while iterating.
  */
-int parse_stop_json(const char *const json_ptr, Stop *stop) {
+int parse_stop_json(
+    const char *const json_ptr, Stop *stop, unsigned int time_now
+) {
   jsmn_parser p;
 
   /** The number of maximum possible tokens we expect in our JSON string + 1 for
@@ -294,11 +295,6 @@ int parse_stop_json(const char *const json_ptr, Stop *stop) {
     default:
       LOG_ERR("Top level token isn't an array or object.");
       return EXIT_FAILURE;
-  }
-
-  const int time_now = get_external_rtc_time();
-  if (time_now == -1) {
-    return EXIT_FAILURE;
   }
 
   /* We want to loop over all the keys of the root object.
