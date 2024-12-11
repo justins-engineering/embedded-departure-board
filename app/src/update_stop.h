@@ -3,10 +3,7 @@
 
 #include <zephyr/kernel.h>
 
-/** Specify the number of display boxes connected*/
-#define NUMBER_OF_DISPLAY_BOXES 3
-
-/** Specify the route, display text, and position for each display box */
+/** Specify the route, position, direction, color, and brightness for each display box */
 // clang-format off
 #define DISPLAY_BOXES {                                                                         \
   { .id = 20001, .position = 0, .direction_code = 'N', .color = 0x009933, .brightness = 0xC2 }, \
@@ -29,6 +26,6 @@ void update_stop_timeout_handler(struct k_timer* timer_id);
 int update_stop(void);
 
 extern struct k_timer update_stop_timer;
-extern struct k_sem stop_sem;
+extern struct k_sem update_stop_sem;
 
 #endif
