@@ -36,6 +36,8 @@ mcuboot:
   address: 0x0
   end_address: 0x20000
   placement:
+    align:
+      end: 0x1000
     before:
     - mcuboot_primary
   region: flash_primary
@@ -54,8 +56,8 @@ mcuboot_primary:
   address: 0x20000
   end_address: 0xe0000
   orig_span: &id001
-  - tfm
   - mcuboot_pad
+  - tfm
   - app
   region: flash_primary
   size: 0xc0000
@@ -92,8 +94,8 @@ nonsecure_storage:
   address: 0xe0000
   end_address: 0xe8000
   orig_span: &id004
-  - nvs_storage
   - settings_storage
+  - nvs_storage
   region: flash_primary
   size: 0x8000
   span: *id004
