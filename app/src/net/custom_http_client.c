@@ -11,13 +11,10 @@
 #include <zephyr/storage/stream_flash.h>
 
 #include "net/lte_manager.h"
+#include "stop_id.h"
 #include "watchdog_app.h"
 
 LOG_MODULE_REGISTER(custom_http_client);
-
-#define FULL_API_PATH                             \
-  CONFIG_SWIFTLY_API_PATH "?stop=" CONFIG_STOP_ID \
-                          "&number=" CONFIG_SWIFTLY_API_NUMBER_OF_PREDICTIONS
 
 static const char swiftly_api_key[] = {
 #include "../keys/private/swiftly-api.key"
@@ -260,7 +257,9 @@ retry:
   } else {
     ptr = stpcpy(ptr, ":443\r\n");
   }
-  ptr = stpcpy(ptr, "User-Agent: EDB/" APP_VERSION_TWEAK_STRING " Stop-ID/" CONFIG_STOP_ID "\r\n");
+  ptr = stpcpy(ptr, "User-Agent: EDB/" APP_VERSION_TWEAK_STRING " Stop-ID/");
+  ptr = stpcpy(ptr, current_stop_id);
+  ptr = stpcpy(ptr, "\r\n");
   if (range_start > 0) {
     ptr = stpcpy(ptr, "Range: ");
     ptr += sprintf(ptr, "%ld", range_start);
@@ -455,7 +454,17 @@ int http_request_stop_json(
   static char hostname[255] = CONFIG_SWIFTLY_API_HOSTNAME;
 
   /** Make the size 255 incase we get a redirect with a longer path */
-  static char path[255] = FULL_API_PATH;
+  static char path[255];
+
+  /* Rebuilt every call (not just once at static-init time) so a stop_id
+   * shadow update (stop_id.h) takes effect on the very next poll -- a
+   * redirect within send_http_request() only rebinds its own local path/
+   * hostname pointers into its own stack buffer, never writes back into
+   * this static array, so reinitializing it here on entry is safe. */
+  snprintk(
+      path, sizeof(path), "%s?stop=%s&number=%s", CONFIG_SWIFTLY_API_PATH, current_stop_id,
+      CONFIG_SWIFTLY_API_NUMBER_OF_PREDICTIONS
+  );
 
   if (k_sem_take(&lte_connected_sem, K_FOREVER) != 0) {
     LOG_ERR("Failed to take lte_connected_sem");

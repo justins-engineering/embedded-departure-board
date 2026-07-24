@@ -22,9 +22,26 @@ static const char swiftly_cert[] = {
     IF_ENABLED(CONFIG_TLS_CREDENTIALS, (0x00))
 };
 
+#if defined(CONFIG_PIGEON)
+/* GTS Root R4 -- api.pidgeiot.com sits behind the Google Trust Services
+ * chain, distinct from Swiftly's Amazon root, so it gets its own
+ * array/sec_tag. */
+static const char pigeon_cert[] = {
+#include "r4.crt.hex"
+    IF_ENABLED(CONFIG_TLS_CREDENTIALS, (0x00))
+};
+#endif  // CONFIG_PIGEON
+
 #ifdef CONFIG_MODEM_KEY_MGMT
 // The total size of the included certificates must be less than 4KB
-BUILD_ASSERT((sizeof(swiftly_cert)) < KB(4), "Certificates too large");
+BUILD_ASSERT(
+    (sizeof(swiftly_cert)
+#if defined(CONFIG_PIGEON)
+     + sizeof(pigeon_cert)
+#endif  // CONFIG_PIGEON
+    ) < KB(4),
+    "Certificates too large"
+);
 #endif
 
 K_SEM_DEFINE(lte_connected_sem, 1, 1);
@@ -96,6 +113,14 @@ int lte_connect(void) {
     LOG_ERR("Failed to provision TLS certificate. TLS_SEC_TAG: %d", SWIFTLY_SEC_TAG);
     return err;
   }
+
+#if defined(CONFIG_PIGEON)
+  err = provision_cert(PIGEON_SEC_TAG, pigeon_cert, sizeof(pigeon_cert));
+  if (err) {
+    LOG_ERR("Failed to provision TLS certificate. TLS_SEC_TAG: %d", PIGEON_SEC_TAG);
+    return err;
+  }
+#endif  // CONFIG_PIGEON
 
   LOG_INF("Initializing LTE interface");
   err = wdt_feed(wdt, wdt_channel_id);

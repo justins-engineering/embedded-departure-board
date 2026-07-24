@@ -8,6 +8,7 @@
 #include "json/parse_swiftly.h"
 #include "net/custom_http_client.h"
 #include "stop.h"
+#include "stop_id.h"
 
 LOG_MODULE_REGISTER(update_stop);
 
@@ -81,9 +82,29 @@ static int update_routes(Stop stop, DisplayBox display_boxes[]) {
   return 0;
 }
 
+/* Swiftly fetch health, read by net/pigeon_client.c for telemetry -- see
+ * update_stop.h's docs. */
+static unsigned int failure_streak;
+static int64_t last_success_uptime_ms = -1;
+
+unsigned int swiftly_consecutive_failures(void) {
+  return failure_streak;
+}
+
+int swiftly_last_success_age_s(void) {
+  if (last_success_uptime_ms < 0) {
+    return -1;
+  }
+  return (int)((k_uptime_get() - last_success_uptime_ms) / 1000);
+}
+
 int update_stop(void) {
   int ret;
-  static Stop stop = {.id = CONFIG_STOP_ID};
+  /* .id points at the mutable current_stop_id buffer (stop_id.h) rather
+   * than a CONFIG_STOP_ID literal, so a stop_id shadow update (see
+   * net/pigeon_client.c) takes effect on the next call without a
+   * reflash -- see stop_id.h's own docs for why this exists. */
+  static Stop stop = {.id = current_stop_id};
   static const DisplayBox display_boxes[] = DISPLAY_BOXES;
 
   static char headers_buf[2048];
@@ -98,18 +119,24 @@ int update_stop(void) {
   );
   if (ret) {
     LOG_ERR("HTTP GET request for JSON failed; cleaning up. ERR: %d", ret);
+    failure_streak++;
     return 1;
   }
 
   ret = parse_swiftly_json(&json_buf[0], &stop);
   if (ret) {
+    failure_streak++;
     return 1;
   }
 
   ret = update_routes(stop, display_boxes);
   if (ret) {
+    failure_streak++;
     return 1;
   }
+
+  failure_streak = 0;
+  last_success_uptime_ms = k_uptime_get();
   return 0;
 }
 

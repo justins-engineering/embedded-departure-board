@@ -6,6 +6,7 @@
 
 #include "display/display_switches.h"
 #include "net/lte_manager.h"
+#include "net/pigeon_client.h"
 #include "real_time_counter.h"
 #include "update_stop.h"
 #include "watchdog_app.h"
@@ -190,6 +191,12 @@ int main(void) {
   // TODO: check for update or wait for update socket
   // (void)download_update();
 
+  /* After LTE, before the display update loop starts -- mirrors
+   * pigeon-examples' https_init sample's pigeon_init() ordering. Applies
+   * whatever shadow config already exists (e.g. a stop_id set from the
+   * dashboard before this boot) before the first display update. */
+  pigeon_client_init();
+
   (void)k_timer_start(
       &update_stop_timer, K_SECONDS(CONFIG_UPDATE_STOP_FREQUENCY_SECONDS),
       K_SECONDS(CONFIG_UPDATE_STOP_FREQUENCY_SECONDS)
@@ -242,6 +249,18 @@ int main(void) {
       }
     } else {
       LOG_DBG("Failed to take update_stop_sem");
+    }
+
+    if (k_sem_take(&pigeon_poll_sem, K_NO_WAIT) == 0) {
+      pigeon_client_poll();
+
+      ret = wdt_feed(wdt, wdt_channel_id);
+      if (ret) {
+        LOG_ERR("Failed to feed watchdog. Err: %d", ret);
+        goto reset;
+      }
+    } else {
+      LOG_DBG("Failed to take pigeon_poll_sem");
     }
 
     k_cpu_idle();

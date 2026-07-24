@@ -31,4 +31,16 @@ int update_stop(void);
 extern struct k_timer update_stop_timer;
 extern struct k_sem update_stop_sem;
 
+/** @brief Consecutive update_stop() failures since the last success.
+ * Read by net/pigeon_client.c for the swiftly_consecutive_failures
+ * telemetry key -- 0 means the most recent update_stop() call succeeded.
+ */
+unsigned int swiftly_consecutive_failures(void);
+
+/** @brief Seconds of uptime since the last successful update_stop() call.
+ * Read by net/pigeon_client.c for the swiftly_last_success_age_s telemetry
+ * key. Returns -1 if update_stop() has never succeeded yet this boot.
+ */
+int swiftly_last_success_age_s(void);
+
 #endif

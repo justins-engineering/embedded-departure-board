@@ -34,6 +34,10 @@ modules/
 bootloader/
 zephyr/
 multiplexer/
+pigeon/
+
+# Real device secrets (CONFIG_PIGEON_ENDPOINT/CONFIG_PIGEON_TOKEN, etc.)
+app/prj.local.conf
 
 # Cortex debugging states
 .vscode/.cortex-debug.registers.state.json

@@ -29,5 +29,18 @@ manifest:
       revision: main
       path: multiplexer
 
+    # Pigeon: PidgeIoT device client library (device shadow / telemetry /
+    # remote stop config). A real west project here, not a local symlink
+    # (contrast the sibling pigeon-examples repo, which symlinks a live
+    # ~/pigeon checkout for active co-development) -- this is a product
+    # repo, not a dev sandbox, and needs a build that reproduces on any
+    # machine/CI runner without depending on a local out-of-tree checkout
+    # existing. zephyr/module.yml wires it in automatically once fetched;
+    # no ZEPHYR_EXTRA_MODULES/CMakeLists changes needed.
+    - name: pigeon
+      url: https://github.com/justins-engineering/pigeon
+      revision: main
+      path: pigeon
+
   self:
     path: app

@@ -4,6 +4,14 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(EXTRA_CONF_FILE ${CMAKE_CURRENT_SOURCE_DIR}/sign.conf)
 
+# Real device secrets (CONFIG_PIGEON_ENDPOINT/CONFIG_PIGEON_TOKEN) live in a
+# gitignored prj.local.conf, auto-merged if present -- same convention as the
+# sibling pigeon-examples repo's samples. Never commit one or paste its
+# contents into a transcript.
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/prj.local.conf)
+  list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_SOURCE_DIR}/prj.local.conf)
+endif()
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(embedded-departure-board)
 
