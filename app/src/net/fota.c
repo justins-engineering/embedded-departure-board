@@ -20,8 +20,7 @@ LOG_MODULE_REGISTER(fota);
 
 BUILD_ASSERT(
     FIXED_PARTITION_EXISTS(MCUBOOT_SECONDARY_LABEL),
-    "Missing " MCUBOOT_SECONDARY_STRING
-    " fixed partition. Secondary slot partition is required!"
+    "Missing " MCUBOOT_SECONDARY_STRING " fixed partition. Secondary slot partition is required!"
 );
 
 void validate_image(void) {
@@ -31,9 +30,8 @@ void validate_image(void) {
 
   boot_read_bank_header(PARTITION_ID(slot0_partition), &header, sizeof(header));
   snprintk(
-      buf, sizeof(buf), "%d.%d.%d-%d", header.h.v1.sem_ver.major,
-      header.h.v1.sem_ver.minor, header.h.v1.sem_ver.revision,
-      header.h.v1.sem_ver.build_num
+      buf, sizeof(buf), "%d.%d.%d-%d", header.h.v1.sem_ver.major, header.h.v1.sem_ver.minor,
+      header.h.v1.sem_ver.revision, header.h.v1.sem_ver.build_num
   );
   LOG_INF("MCUboot swap type: %d", mcuboot_swap_type());
   LOG_INF("Image Version %s", buf);

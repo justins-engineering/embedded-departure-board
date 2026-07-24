@@ -87,9 +87,7 @@ static int update_routes(Stop stop, DisplayBox display_boxes[]) {
 static unsigned int failure_streak;
 static int64_t last_success_uptime_ms = -1;
 
-unsigned int swiftly_consecutive_failures(void) {
-  return failure_streak;
-}
+unsigned int swiftly_consecutive_failures(void) { return failure_streak; }
 
 int swiftly_last_success_age_s(void) {
   if (last_success_uptime_ms < 0) {
@@ -140,6 +138,4 @@ int update_stop(void) {
   return 0;
 }
 
-void update_stop_timeout_handler(struct k_timer* timer_id) {
-  (void)k_sem_give(&update_stop_sem);
-}
+void update_stop_timeout_handler(struct k_timer* timer_id) { (void)k_sem_give(&update_stop_sem); }

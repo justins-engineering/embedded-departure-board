@@ -8,7 +8,7 @@ LOG_MODULE_REGISTER(stop_id);
 
 char current_stop_id[STOP_ID_MAX_LEN] = CONFIG_STOP_ID;
 
-void stop_id_set(const char *id) {
+void stop_id_set(const char* id) {
   if (!id || !*id) {
     LOG_ERR("Refusing to set an empty stop ID");
     return;

@@ -29,6 +29,6 @@ extern char current_stop_id[STOP_ID_MAX_LEN];
  *  debuggable failure (wrong/no departures shown); silently refusing the
  *  update would look identical to the shadow poll never having run at all.
  */
-void stop_id_set(const char *id);
+void stop_id_set(const char* id);
 
 #endif  // STOP_ID_H

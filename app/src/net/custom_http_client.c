@@ -30,7 +30,7 @@ enum response_code {
 };
 
 /* Setup TLS options on a given socket */
-int tls_setup(int fd, char *hostname, sec_tag_t sec_tag) {
+int tls_setup(int fd, char* hostname, sec_tag_t sec_tag) {
   int err;
 
   /* Security tag that we have provisioned the certificate with */
@@ -69,8 +69,8 @@ int tls_setup(int fd, char *hostname, sec_tag_t sec_tag) {
   return EXIT_SUCCESS;
 }
 
-static int parse_status(char *headers_buf) {
-  char *ptr;
+static int parse_status(char* headers_buf) {
+  char* ptr;
   int code;
 
   ptr = strstr(headers_buf, "HTTP");
@@ -109,7 +109,7 @@ static int parse_status(char *headers_buf) {
   }
 }
 
-static int parse_headers(int *sock, char *headers_buf, int headers_buf_size) {
+static int parse_headers(int* sock, char* headers_buf, int headers_buf_size) {
   int state = 0;
   int bytes;
   int status;
@@ -157,7 +157,7 @@ static int parse_headers(int *sock, char *headers_buf, int headers_buf_size) {
 }
 
 static long parse_response(
-    int *sock, char *recv_body_buf, int recv_body_buf_size, long offset, char *headers_buf,
+    int* sock, char* recv_body_buf, int recv_body_buf_size, long offset, char* headers_buf,
     int headers_buf_size, _Bool write_nvs
 ) {
   int bytes;
@@ -194,8 +194,8 @@ static long parse_response(
   return EXIT_SUCCESS;
 }
 
-static char *get_redirect_location(char *headers_buf, int headers_buf_size) {
-  char *ptr;
+static char* get_redirect_location(char* headers_buf, int headers_buf_size) {
+  char* ptr;
 
   ptr = strstr(headers_buf, "Location:");
   if (ptr == NULL) {
@@ -223,21 +223,21 @@ static char *get_redirect_location(char *headers_buf, int headers_buf_size) {
 }
 
 static int send_http_request(
-    char *hostname, char *path, char *accept, sec_tag_t sec_tag, char *recv_body_buf,
-    int recv_body_buf_size, char *headers_buf, int headers_buf_size, _Bool write_nvs
+    char* hostname, char* path, char* accept, sec_tag_t sec_tag, char* recv_body_buf,
+    int recv_body_buf_size, char* headers_buf, int headers_buf_size, _Bool write_nvs
 ) {
   int bytes;
   int err;
   int headers_size;
   size_t offset;
-  char *ptr;
+  char* ptr;
   long rc = 0;
   int sock = -1;
   long range_start = 0;
   // Keep track of retry attempts so we don't get in a loop
   int retry_client_error = 0;
 
-  struct zsock_addrinfo *addr_inf;
+  struct zsock_addrinfo* addr_inf;
   static struct zsock_addrinfo hints = {.ai_socktype = SOCK_STREAM, .ai_flags = AI_NUMERICSERV};
 
 retry:
@@ -294,7 +294,7 @@ retry:
   char peer_addr[INET6_ADDRSTRLEN];
 
   if (zsock_inet_ntop(
-          addr_inf->ai_family, &((struct sockaddr_in *)(addr_inf->ai_addr))->sin_addr, peer_addr,
+          addr_inf->ai_family, &((struct sockaddr_in*)(addr_inf->ai_addr))->sin_addr, peer_addr,
           INET6_ADDRSTRLEN
       ) == NULL) {
     LOG_ERR("inet_ntop() failed, %s", strerror(errno));
@@ -324,7 +324,7 @@ retry:
   }
 
   LOG_DBG(
-      "Connecting to %s:%d", hostname, ntohs(((struct sockaddr_in *)(addr_inf->ai_addr))->sin_port)
+      "Connecting to %s:%d", hostname, ntohs(((struct sockaddr_in*)(addr_inf->ai_addr))->sin_port)
   );
 
   err = zsock_connect(sock, addr_inf->ai_addr, addr_inf->ai_addrlen);
@@ -338,7 +338,7 @@ retry:
       "Socket %d addrinfo: ai_family=%d, ai_socktype=%d, ai_protocol=%d, "
       "sa_family=%d, sin_port=%x",
       sock, addr_inf->ai_family, addr_inf->ai_socktype, addr_inf->ai_protocol,
-      addr_inf->ai_addr->sa_family, ((struct sockaddr_in *)addr_inf->ai_addr)->sin_port
+      addr_inf->ai_addr->sa_family, ((struct sockaddr_in*)addr_inf->ai_addr)->sin_port
   );
 
   offset = 0;
@@ -446,7 +446,7 @@ redirect:
 }
 
 int http_request_stop_json(
-    char *stop_body_buf, int stop_body_buf_size, char *headers_buf, int headers_buf_size
+    char* stop_body_buf, int stop_body_buf_size, char* headers_buf, int headers_buf_size
 ) {
   int err;
 

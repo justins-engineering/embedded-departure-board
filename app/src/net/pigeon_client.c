@@ -17,7 +17,7 @@ LOG_MODULE_REGISTER(pigeon_client);
 
 K_SEM_DEFINE(pigeon_poll_sem, 0, 1);
 
-static void pigeon_poll_timeout_handler(struct k_timer *timer_id) {
+static void pigeon_poll_timeout_handler(struct k_timer* timer_id) {
   ARG_UNUSED(timer_id);
   (void)k_sem_give(&pigeon_poll_sem);
 }
@@ -49,7 +49,7 @@ static const struct json_obj_descr target_config_descr[] = {
  * "applied" at all. */
 #define TARGET_CONFIG_REQUIRED_BITS 0x1
 
-static void apply_target_config(const char *target_config, int32_t target_version) {
+static void apply_target_config(const char* target_config, int32_t target_version) {
   /* Defaults preserved for any field the shadow's JSON doesn't include --
    * json_obj_parse() only writes fields it actually decodes. */
   struct target_config_wire cfg = {
@@ -59,7 +59,7 @@ static void apply_target_config(const char *target_config, int32_t target_versio
   snprintk(cfg.stop_id, sizeof(cfg.stop_id), "%s", current_stop_id);
 
   int64_t decoded = json_obj_parse(
-      (char *)target_config, strlen(target_config), target_config_descr,
+      (char*)target_config, strlen(target_config), target_config_descr,
       ARRAY_SIZE(target_config_descr), &cfg
   );
 

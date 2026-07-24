@@ -35,9 +35,10 @@ static const char pigeon_cert[] = {
 #ifdef CONFIG_MODEM_KEY_MGMT
 // The total size of the included certificates must be less than 4KB
 BUILD_ASSERT(
-    (sizeof(swiftly_cert)
+    (
+        sizeof(swiftly_cert)
 #if defined(CONFIG_PIGEON)
-     + sizeof(pigeon_cert)
+        + sizeof(pigeon_cert)
 #endif  // CONFIG_PIGEON
     ) < KB(4),
     "Certificates too large"
@@ -47,7 +48,7 @@ BUILD_ASSERT(
 K_SEM_DEFINE(lte_connected_sem, 1, 1);
 
 #ifdef CONFIG_NRF_MODEM_LIB_ON_FAULT_APPLICATION_SPECIFIC
-void nrf_modem_fault_handler(struct nrf_modem_fault_info *fault_info) {
+void nrf_modem_fault_handler(struct nrf_modem_fault_info* fault_info) {
   LOG_ERR("Reason: %d", fault_info->reason);
   LOG_ERR("Program Counter: %d", fault_info->program_counter);
   LOG_ERR("%s", nrf_modem_lib_fault_strerror(errno));
