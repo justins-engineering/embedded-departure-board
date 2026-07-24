@@ -111,6 +111,49 @@ This repo includes `.vscode/tasks.json` to make develpoment easier. The included
   - Builds the At Client sample provided by nrf.
   - Useful for debugging via AT commands. Use a serial console to send AT commands
 
+## PidgeIoT integration (`pigeon-integration` branch) — bench-day handoff
+
+This branch bumps NCS to 3.4.0 and makes the board a managed PidgeIoT device
+(shadow-driven `stop_id`, telemetry) — see the branch's commit messages for
+the full design writeup. Both debug and release profiles build clean, and
+the board was left flashed with the final build. What's still outstanding,
+all requiring hands-on-bench access this session didn't have:
+
+1. **Console wiring needs physical checking.** The board was reconnected to
+   the bench (external J-Link SWD + separate CP2102N console cable) the
+   morning this work started. Flashing works reliably (`nrfutil` program+
+   verify succeed) for both this branch's firmware and a stock, unmodified
+   `zephyr/samples/hello_world` control build, but neither produces a single
+   byte on `/dev/ttyUSB0` at their respective correct baud rates (1,000,000
+   / 115,200), across resets, pin-resets, and full recovers. Two independent
+   images being equally silent rules out firmware as the cause — this is a
+   cable/wiring/jumper issue between the 9160's TX pin and the CP2102N
+   bridge, not something fixable from software. Check/reseat that wiring
+   before anything else in this list.
+2. **`CONFIG_PIGEON_WATCHDOG` + `watchdog_app.c` share one physical
+   watchdog**, unconfirmed on real hardware. This board's `watchdog0`
+   devicetree alias points at the exact same `wdt0` peripheral
+   `watchdog_app.c` already owns end-to-end (`wdt_install_timeout`/
+   `wdt_setup`, fed throughout `main.c`'s loop). Reading Zephyr's actual
+   `task_wdt_init()`/`task_wdt_add()` source suggests this should fail
+   gracefully — `wdt_install_timeout()` on an already-`wdt_setup()`'d device
+   is expected to error out, which `pigeon_watchdog_start()` already handles
+   by just logging and leaving its own channel unarmed, not crashing or
+   otherwise interfering with `watchdog_app.c`. That's reasoned from source,
+   not yet confirmed against a live console log — watch for a
+   `task_wdt_init failed` line at boot and confirm `watchdog_app.c`'s own
+   feed loop still runs normally either way.
+3. **`zephyr/soc/nordic/Kconfig` patch**: see Setup step 10 above — required
+   after every `west update` on this branch, not committed since it targets
+   a vendored/gitignored file.
+4. **Once console output is confirmed working**, the pending verification
+   sequence is: boot → LTE attach → pigeon shadow sync (watch for
+   `pigeon_shadow_get`/`Stop ID updated to:` log lines) → telemetry keys
+   (`rsrp_dbm`/`uptime_s`/`swiftly_consecutive_failures`/
+   `swiftly_last_success_age_s`) actually landing in the dashboard → the
+   money demo: pushing a new `stop_id` via the shadow from the dashboard/API
+   and confirming the sign switches stops without a reflash.
+
 ## Creating a Release
 Update the [VERSION file](https://github.com/umts/embedded-departure-board/blob/main/app/VERSION).
 On a successful push to the main branch the [release workflow](https://github.com/umts/embedded-departure-board/blob/main/.github/workflows/release.yml) will; create a new release, generate release notes, and upload the freshly built hex/bin files to the release.
