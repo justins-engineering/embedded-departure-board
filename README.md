@@ -115,9 +115,18 @@ This repo includes `.vscode/tasks.json` to make develpoment easier. The included
 
 This branch bumps NCS to 3.4.0 and makes the board a managed PidgeIoT device
 (shadow-driven `stop_id`, telemetry) — see the branch's commit messages for
-the full design writeup. Both debug and release profiles build clean, and
-the board was left flashed with the final build. What's still outstanding,
-all requiring hands-on-bench access this session didn't have:
+the full design writeup. Refreshed 2026-07-29: the `pigeon` west module was
+synced to its pinned `main` tip (`9bb5117` → `0db1214`; no public-API or
+Kconfig changes between the two, just a `pigeon_shell` internal fix and a
+`pigeon_init()` guard relaxation that doesn't affect this app), the
+`CONFIG_PIGEON_WATCHDOG` question from the previous handoff was settled by
+tracing the vendored sources (see item 2 — now a decision, not an open
+check), the telemetry/shadow wire contract was re-verified against
+`~/pidgeiot/docs/api.md` (flat string key/value telemetry, `202 Accepted`
+from prod's queue path is accepted by the library's any-2xx check), and both
+profiles were rebuilt clean against current pigeon into `build_debug/` and
+`build_release/`. What's still outstanding, all requiring hands-on-bench
+access:
 
 1. **Console wiring needs physical checking.** The board was reconnected to
    the bench (external J-Link SWD + separate CP2102N console cable) the
@@ -130,27 +139,33 @@ all requiring hands-on-bench access this session didn't have:
    cable/wiring/jumper issue between the 9160's TX pin and the CP2102N
    bridge, not something fixable from software. Check/reseat that wiring
    before anything else in this list.
-2. **`CONFIG_PIGEON_WATCHDOG` + `watchdog_app.c` share one physical
-   watchdog**, unconfirmed on real hardware. This board's `watchdog0`
-   devicetree alias points at the exact same `wdt0` peripheral
-   `watchdog_app.c` already owns end-to-end (`wdt_install_timeout`/
-   `wdt_setup`, fed throughout `main.c`'s loop). Reading Zephyr's actual
-   `task_wdt_init()`/`task_wdt_add()` source suggests this should fail
-   gracefully — `wdt_install_timeout()` on an already-`wdt_setup()`'d device
-   is expected to error out, which `pigeon_watchdog_start()` already handles
-   by just logging and leaving its own channel unarmed, not crashing or
-   otherwise interfering with `watchdog_app.c`. That's reasoned from source,
-   not yet confirmed against a live console log — watch for a
-   `task_wdt_init failed` line at boot and confirm `watchdog_app.c`'s own
-   feed loop still runs normally either way.
+2. **The image on the board is stale — reflash before verifying.** The board
+   was left flashed with the pre-refresh release build (pigeon `9bb5117`,
+   `CONFIG_PIGEON_WATCHDOG=y`). The current branch turns
+   `CONFIG_PIGEON_WATCHDOG` **off** in the release profile: this board's
+   `watchdog0` alias is the same physical `wdt0` that `watchdog_app.c`
+   already owns, and the vendored-source trace (full reasoning in
+   `app/prj_release.conf`'s comment) shows pigeon's watchdog could only ever
+   be inert here — `wdt_nrf_install_timeout()` returns `-EBUSY` on the
+   already-`wdt_setup()`'d device and `task_wdt_init()` bails before arming
+   even its software timer — while a flipped init order would boot-loop the
+   app's own watchdog. `CONFIG_PIGEON_REBOOT_ON_FATAL=y` stays (release
+   profile only). Consequence for the bench: a fresh release build should
+   show **no** `task_wdt_init failed` line and no pigeon-watchdog log at
+   all; the old still-flashed image will log that error once at boot —
+   expected, harmless, and gone after reflashing. Fresh artifacts:
+   `build_debug/` and `build_release/` at the workspace root (`./build` is
+   the old pre-refresh build, kept as-flashed).
 3. **`zephyr/soc/nordic/Kconfig` patch**: see Setup step 10 above — required
    after every `west update` on this branch, not committed since it targets
-   a vendored/gitignored file.
+   a vendored/gitignored file. (Still applied in this workspace; verified
+   present after the pigeon module sync.)
 4. **Once console output is confirmed working**, the pending verification
    sequence is: boot → LTE attach → pigeon shadow sync (watch for
    `pigeon_shadow_get`/`Stop ID updated to:` log lines) → telemetry keys
    (`rsrp_dbm`/`uptime_s`/`swiftly_consecutive_failures`/
-   `swiftly_last_success_age_s`) actually landing in the dashboard → the
+   `swiftly_last_success_age_s`) actually landing in the dashboard (all four
+   are numeric strings, so they show up in fancier's graph key-picker) → the
    money demo: pushing a new `stop_id` via the shadow from the dashboard/API
    and confirming the sign switches stops without a reflash.
 

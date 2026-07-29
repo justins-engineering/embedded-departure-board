@@ -1,10 +1,7 @@
-# Zephyr build folders
+# Zephyr build folders (build/ = as-flashed; build_debug/ / build_release/ =
+# the 2026-07-29 refresh builds, see README's bench-day handoff)
 build/
-build_release/
-build_debug/
-
-# Zephyr local conf file
-app/prj.local.conf
+build_*/
 
 # Zephyr logs
 log*.txt
