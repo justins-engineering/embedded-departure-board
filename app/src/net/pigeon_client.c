@@ -118,37 +118,42 @@ static int32_t read_rsrp_dbm(void) {
   return rsrp_raw - 140;
 }
 
-/* pigeon_set_shadow_param()/pigeon_shadow_flush() hold only a single
- * pending key/val slot (see pigeon_core.c) -- there is no batch-report
- * API, so each telemetry key here is its own flush (its own HTTPS POST).
- * Four short requests per CONFIG_PIGEON_CLIENT_POLL_INTERVAL_SECONDS is a
- * deliberately modest LTE data cost for a mains-powered sign with no
- * power budget to speak of, but cellular data still isn't free. */
+/* Batched via pigeon_telemetry_set()/pigeon_telemetry_flush() (pigeon task
+ * #64): all keys stage into the library's latest-value-per-key pending
+ * store (CONFIG_PIGEON_TELEMETRY_MAX_KEYS, default 8 -- plenty for these 4)
+ * and go out as ONE flat-JSON POST per poll cycle instead of one POST per
+ * key -- a quarter of the previous LTE request cost. Set results are
+ * ignorable by construction here (4 short keys can't hit the -ENOMEM/
+ * -ENOSPC limits); a failed flush keeps its keys queued (clear-on-success),
+ * and since every key is re-set with a fresh value each cycle, a transient
+ * failure just means this cycle's gauges ride the next report. */
 static void report_telemetry(void) {
   char val[16];
 
   snprintk(val, sizeof(val), "%lld", k_uptime_get() / 1000);
-  (void)pigeon_set_shadow_param("uptime_s", val);
-  (void)pigeon_shadow_flush();
+  (void)pigeon_telemetry_set("uptime_s", val);
 
   int32_t rsrp_dbm = read_rsrp_dbm();
 
   if (rsrp_dbm != INT32_MIN) {
     snprintk(val, sizeof(val), "%d", rsrp_dbm);
-    (void)pigeon_set_shadow_param("rsrp_dbm", val);
-    (void)pigeon_shadow_flush();
+    (void)pigeon_telemetry_set("rsrp_dbm", val);
   }
 
   snprintk(val, sizeof(val), "%u", swiftly_consecutive_failures());
-  (void)pigeon_set_shadow_param("swiftly_consecutive_failures", val);
-  (void)pigeon_shadow_flush();
+  (void)pigeon_telemetry_set("swiftly_consecutive_failures", val);
 
   int age_s = swiftly_last_success_age_s();
 
   if (age_s >= 0) {
     snprintk(val, sizeof(val), "%d", age_s);
-    (void)pigeon_set_shadow_param("swiftly_last_success_age_s", val);
-    (void)pigeon_shadow_flush();
+    (void)pigeon_telemetry_set("swiftly_last_success_age_s", val);
+  }
+
+  int err = pigeon_telemetry_flush();
+
+  if (err) {
+    LOG_WRN("pigeon_telemetry_flush failed: %d (keys stay queued)", err);
   }
 }
 
