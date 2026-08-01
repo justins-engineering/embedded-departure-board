@@ -166,20 +166,15 @@ hands-on-bench access:
    (2026-07-30, batched telemetry, pigeon `e0cba00`): `build_debug/` and
    `build_release/` at the workspace root (`./build` is the old pre-refresh
    build, kept as-flashed).
-3. **Two local patches to west-managed (gitignored) files**, both required
-   after every `west update` on this branch:
+3. **One local patch to a west-managed (gitignored) file**, required after
+   every `west update` on this branch:
    - `zephyr/soc/nordic/Kconfig`: see Setup step 10 above. (Verified still
      applied after both pigeon module syncs.)
-   - `pigeon/src/pigeon_core.c` (**new 2026-07-30, temporary**): add
-     `#include <zephyr/sys/printk.h>` after the existing includes. pigeon
-     `e0cba00`'s batch-telemetry body builder calls `snprintk` but only gets
-     `printk.h` transitively via logging when `CONFIG_LOG=y` — the release
-     profile's log-free MCUboot config (which also compiles every west
-     module, pigeon included) has no such path, and the release sysbuild
-     fails with an implicit-declaration error without this include. The
-     debug profile masks it (its MCUboot config has `CONFIG_LOG=y`). This
-     one belongs upstream in the pigeon repo; drop the local patch once a
-     pushed pigeon `main` carries the include.
+
+   (The previous handoff's second patch here — a temporary
+   `#include <zephyr/sys/printk.h>` in `pigeon/src/pigeon_core.c` — is
+   obsolete: pigeon `c9790f8` carries that include upstream, and the
+   workspace checkout has been on it since the 2026-07-31 sync.)
 4. **Once console output is confirmed working**, the pending verification
    sequence is: boot → LTE attach → pigeon shadow sync (watch for
    `pigeon_shadow_get`/`Stop ID updated to:` log lines) → telemetry keys
