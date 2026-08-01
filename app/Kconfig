@@ -94,4 +94,15 @@ config PIGEON_CLIENT_POLL_INTERVAL_SECONDS
     mains-powered sign, but the LTE data budget for the poll's shadow GET
     plus telemetry POSTs still isn't free.
 
+config PIGEON_CLIENT_THREAD_STACK_SIZE
+  int "Pigeon client thread stack size (bytes)"
+  default 6144
+  help
+    Stack for the dedicated thread all PidgeIoT I/O runs on (see
+    net/pigeon_client.c) -- sized for the pigeon library's HTTPS client
+    plus JSON shadow decode, NOT for a TLS handshake: pigeon's sockets
+    are plain offloaded IPPROTO_TLS_1_2, so the handshake runs inside the
+    modem, never on this stack (contrast CONFIG_PIGEON_WS_THREAD_STACK_SIZE's
+    8192, which does budget for an on-CPU mbedTLS handshake).
+
 endmenu

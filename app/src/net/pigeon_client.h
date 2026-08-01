@@ -11,26 +11,19 @@
 
 #include <zephyr/kernel.h>
 
-extern struct k_timer pigeon_poll_timer;
-extern struct k_sem pigeon_poll_sem;
-
-/** @brief Initialize the pigeon library and apply whatever shadow config
- *  already exists (falling back to this build's baked-in defaults --
- *  CONFIG_STOP_ID via stop_id.h -- if the shadow has none yet).
+/** @brief Initialize the pigeon library and start the pigeon client thread.
  *
- * Call once, after LTE is up (mirrors https_init's pigeon_init() ordering).
- * Starts pigeon_poll_timer on CONFIG_PIGEON_CLIENT_POLL_INTERVAL_SECONDS;
- * the shadow's own "telemetry_interval" (if present) restarts it with a
- * different period the first time a poll applies one.
+ * Call once, after LTE is up. Never blocks: all pigeon network I/O
+ * (shadow sync, telemetry, and their failure/retry handling) runs on a
+ * dedicated low-priority thread, so a slow or unreachable PidgeIoT can
+ * never stall main's display loop, delay boot, or starve the hardware
+ * watchdog main feeds. On pigeon_init() failure the sign simply runs
+ * unmanaged this boot (Kconfig-default stop_id, no telemetry).
+ *
+ * The poll cadence starts at CONFIG_PIGEON_CLIENT_POLL_INTERVAL_SECONDS;
+ * the shadow's own "telemetry_interval" (if present) re-paces it, and
+ * consecutive failed cycles back off to at most 4x the interval.
  */
 void pigeon_client_init(void);
-
-/** @brief One shadow sync + telemetry report cycle.
- *
- * Call from the main loop whenever pigeon_poll_sem is available (same
- * pattern as update_stop_sem/update_stop()). Never blocks the caller for
- * more than a handful of short HTTPS request/response round trips.
- */
-void pigeon_client_poll(void);
 
 #endif  // PIGEON_CLIENT_H

@@ -13,14 +13,17 @@
 #ifndef STOP_ID_H
 #define STOP_ID_H
 
+#include <stddef.h>
+
 /** Long enough for any real Swiftly stop ID with room to spare (the
  * existing CONFIG_STOP_ID values in use are 2-3 digits; Stop.route_id
  * elsewhere in this codebase caps at 4 chars for the same kind of ID). */
 #define STOP_ID_MAX_LEN 16
 
-/** Current stop ID, initialized from CONFIG_STOP_ID. Read directly (e.g.
- * Stop.id in update_stop.c) -- always NUL-terminated, never written to
- * except via stop_id_set(). */
+/** Current stop ID, initialized from CONFIG_STOP_ID. Always NUL-terminated,
+ * never written except via stop_id_set(). Since the pigeon client moved to
+ * its own thread, cross-thread readers must copy it out via stop_id_get()
+ * rather than reading this buffer directly (torn reads otherwise). */
 extern char current_stop_id[STOP_ID_MAX_LEN];
 
 /** @brief Overwrite the current stop ID.
@@ -30,5 +33,9 @@ extern char current_stop_id[STOP_ID_MAX_LEN];
  *  update would look identical to the shadow poll never having run at all.
  */
 void stop_id_set(const char* id);
+
+/** @brief Copy the current stop ID into buf (always NUL-terminated),
+ *  truncating if buf_len is too small. Safe from any thread. */
+void stop_id_get(char* buf, size_t buf_len);
 
 #endif  // STOP_ID_H

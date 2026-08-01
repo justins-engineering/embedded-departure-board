@@ -240,6 +240,12 @@ static int send_http_request(
   struct zsock_addrinfo* addr_inf;
   static struct zsock_addrinfo hints = {.ai_socktype = SOCK_STREAM, .ai_flags = AI_NUMERICSERV};
 
+  /* Snapshotted once per request: the pigeon client thread may rewrite the
+   * shared buffer at any moment (stop_id.h), and a header must not tear. */
+  char stop_id[STOP_ID_MAX_LEN];
+
+  stop_id_get(stop_id, sizeof(stop_id));
+
 retry:
   err = wdt_feed(wdt, wdt_channel_id);
   if (err) {
@@ -258,7 +264,7 @@ retry:
     ptr = stpcpy(ptr, ":443\r\n");
   }
   ptr = stpcpy(ptr, "User-Agent: EDB/" APP_VERSION_TWEAK_STRING " Stop-ID/");
-  ptr = stpcpy(ptr, current_stop_id);
+  ptr = stpcpy(ptr, stop_id);
   ptr = stpcpy(ptr, "\r\n");
   if (range_start > 0) {
     ptr = stpcpy(ptr, "Range: ");
@@ -305,9 +311,16 @@ retry:
 
   if (sec_tag == NO_SEC_TAG) {
     sock = zsock_socket(addr_inf->ai_family, SOCK_STREAM, addr_inf->ai_protocol);
-  } else if (IS_ENABLED(CONFIG_MODEM_KEY_MGMT)) {
-    sock = zsock_socket(addr_inf->ai_family, SOCK_STREAM, IPPROTO_TLS_1_2);
   } else {
+    /* Always native TLS (mbedTLS over an offloaded TCP socket), no longer
+     * keyed on CONFIG_MODEM_KEY_MGMT: the modem's own TLS can't take
+     * Swiftly's large records (git history: "offloaded secure sockets has
+     * a restriction of 2k recv limit" -- the reason this path migrated to
+     * native TLS), and this path's CA certs live in Zephyr's native
+     * credential store either way (lte_manager.c). CONFIG_MODEM_KEY_MGMT
+     * being on no longer implies modem TLS here -- since the pigeon
+     * integration it exists to provision the PIGEON cert into the modem
+     * store, whose small-record traffic is what modem TLS is fine for. */
     sock = zsock_socket(addr_inf->ai_family, SOCK_STREAM | SOCK_NATIVE_TLS, IPPROTO_TLS_1_2);
   }
 
@@ -461,8 +474,11 @@ int http_request_stop_json(
    * redirect within send_http_request() only rebinds its own local path/
    * hostname pointers into its own stack buffer, never writes back into
    * this static array, so reinitializing it here on entry is safe. */
+  char stop_id[STOP_ID_MAX_LEN];
+
+  stop_id_get(stop_id, sizeof(stop_id));
   snprintk(
-      path, sizeof(path), "%s?stop=%s&number=%s", CONFIG_SWIFTLY_API_PATH, current_stop_id,
+      path, sizeof(path), "%s?stop=%s&number=%s", CONFIG_SWIFTLY_API_PATH, stop_id,
       CONFIG_SWIFTLY_API_NUMBER_OF_PREDICTIONS
   );
 

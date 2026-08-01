@@ -191,17 +191,19 @@ int main(void) {
   // TODO: check for update or wait for update socket
   // (void)download_update();
 
-  /* After LTE, before the display update loop starts -- mirrors
-   * pigeon-examples' https_init sample's pigeon_init() ordering. Applies
-   * whatever shadow config already exists (e.g. a stop_id set from the
-   * dashboard before this boot) before the first display update. */
-  pigeon_client_init();
-
   (void)k_timer_start(
       &update_stop_timer, K_SECONDS(CONFIG_UPDATE_STOP_FREQUENCY_SECONDS),
       K_SECONDS(CONFIG_UPDATE_STOP_FREQUENCY_SECONDS)
   );
   LOG_INF("update_stop_timer started");
+
+  /* After LTE and after the display's own timer is armed. Non-blocking:
+   * the shadow sync/telemetry cycle (including the immediate first sync
+   * that applies e.g. a stop_id set from the dashboard before this boot)
+   * runs on the pigeon client's OWN lower-priority thread, so an
+   * unreachable PidgeIoT can neither delay this boot path nor starve the
+   * watchdog this loop feeds. */
+  pigeon_client_init();
 
   while (1) {
     if (k_sem_take(&rtc_sync_sem, K_NO_WAIT) == 0) {
@@ -251,19 +253,14 @@ int main(void) {
       LOG_DBG("Failed to take update_stop_sem");
     }
 
-    if (k_sem_take(&pigeon_poll_sem, K_NO_WAIT) == 0) {
-      pigeon_client_poll();
-
-      ret = wdt_feed(wdt, wdt_channel_id);
-      if (ret) {
-        LOG_ERR("Failed to feed watchdog. Err: %d", ret);
-        goto reset;
-      }
-    } else {
-      LOG_DBG("Failed to take pigeon_poll_sem");
-    }
-
-    k_cpu_idle();
+    /* k_sleep, NOT k_cpu_idle: k_cpu_idle() never yields -- this prio-0
+     * thread stays runnable through it, so every lower-priority thread
+     * (the pigeon client thread; Zephyr's own deferred-log thread) would
+     * starve forever. Sleeping blocks this thread between passes, letting
+     * them run, while any of them is still preempted the instant this
+     * loop's next pass is due. 100ms granularity is noise against the
+     * 30s update cadence and the 60s watchdog window. */
+    k_sleep(K_MSEC(100));
   }
 
 reset:
