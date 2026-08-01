@@ -114,77 +114,173 @@ This repo includes `.vscode/tasks.json` to make develpoment easier. The included
 ## PidgeIoT integration (`pigeon-integration` branch) — bench-day handoff
 
 This branch bumps NCS to 3.4.0 and makes the board a managed PidgeIoT device
-(shadow-driven `stop_id`, telemetry) — see the branch's commit messages for
-the full design writeup. Refreshed 2026-07-29: the `pigeon` west module was
-synced to its pinned `main` tip (`9bb5117` → `0db1214`; no public-API or
-Kconfig changes between the two, just a `pigeon_shell` internal fix and a
-`pigeon_init()` guard relaxation that doesn't affect this app), the
-`CONFIG_PIGEON_WATCHDOG` question from the previous handoff was settled by
-tracing the vendored sources (see item 2 — now a decision, not an open
-check), the telemetry/shadow wire contract was re-verified against
-`~/pidgeiot/docs/api.md` (flat string key/value telemetry, `202 Accepted`
-from prod's queue path is accepted by the library's any-2xx check), and both
-profiles were rebuilt clean against current pigeon into `build_debug/` and
-`build_release/`.
+— see the branch's commit messages for the full design writeups (they carry
+the file:line traces). History: 2026-07-29 synced pigeon `9bb5117`→`0db1214`
+and settled the `CONFIG_PIGEON_WATCHDOG`-off decision (see
+`app/prj_release.conf`'s comment); 2026-07-30 batched the telemetry cycle
+into one POST (pigeon `e0cba00`).
 
-Refreshed again 2026-07-30: `pigeon` synced to `e0cba00` (task #64's batch
-telemetry API) and `net/pigeon_client.c` switched from four per-key
-set+flush round trips to four `pigeon_telemetry_set()` calls and ONE
-`pigeon_telemetry_flush()` — the whole report cycle is now a single
-flat-JSON POST (a quarter of the previous LTE request cost). The default
-`CONFIG_PIGEON_TELEMETRY_MAX_KEYS=8` comfortably fits this app's 4 keys.
-Both profiles rebuilt clean; note the new **second local patch** required in
-this workspace (item 3 below). What's still outstanding, all requiring
-hands-on-bench access:
+**Refreshed 2026-08-01** — four new capabilities landed, each its own
+commit (offline resilience, shadow-tunable runtime knobs, dictionary log
+upload, FOTA), plus two commits in the `pigeon` library itself. Fresh
+artifacts for the bench: **`build_rebase_debug/` and
+`build_rebase_release/`** (pigeon `53c669e`; both profiles built clean
+after every commit). Older `./build`, `build_debug/`, `build_release/`
+dirs predate all of this.
 
-1. **Console wiring needs physical checking.** The board was reconnected to
-   the bench (external J-Link SWD + separate CP2102N console cable) the
-   morning this work started. Flashing works reliably (`nrfutil` program+
-   verify succeed) for both this branch's firmware and a stock, unmodified
-   `zephyr/samples/hello_world` control build, but neither produces a single
-   byte on `/dev/ttyUSB0` at their respective correct baud rates (1,000,000
-   / 115,200), across resets, pin-resets, and full recovers. Two independent
-   images being equally silent rules out firmware as the cause — this is a
-   cable/wiring/jumper issue between the 9160's TX pin and the CP2102N
-   bridge, not something fixable from software. Check/reseat that wiring
-   before anything else in this list.
-2. **The image on the board is stale — reflash before verifying.** The board
-   was left flashed with the pre-refresh release build (pigeon `9bb5117`,
-   `CONFIG_PIGEON_WATCHDOG=y`, per-key telemetry). The current branch turns
-   `CONFIG_PIGEON_WATCHDOG` **off** in the release profile: this board's
-   `watchdog0` alias is the same physical `wdt0` that `watchdog_app.c`
-   already owns, and the vendored-source trace (full reasoning in
-   `app/prj_release.conf`'s comment) shows pigeon's watchdog could only ever
-   be inert here — `wdt_nrf_install_timeout()` returns `-EBUSY` on the
-   already-`wdt_setup()`'d device and `task_wdt_init()` bails before arming
-   even its software timer — while a flipped init order would boot-loop the
-   app's own watchdog. `CONFIG_PIGEON_REBOOT_ON_FATAL=y` stays (release
-   profile only). Consequence for the bench: a fresh release build should
-   show **no** `task_wdt_init failed` line and no pigeon-watchdog log at
-   all; the old still-flashed image will log that error once at boot —
-   expected, harmless, and gone after reflashing. Fresh artifacts
-   (2026-07-30, batched telemetry, pigeon `e0cba00`): `build_debug/` and
-   `build_release/` at the workspace root (`./build` is the old pre-refresh
-   build, kept as-flashed).
-3. **One local patch to a west-managed (gitignored) file**, required after
-   every `west update` on this branch:
-   - `zephyr/soc/nordic/Kconfig`: see Setup step 10 above. (Verified still
-     applied after both pigeon module syncs.)
+### Offline-resilience guarantees (task #4 — audit + fixes, 2026-08-01)
 
-   (The previous handoff's second patch here — a temporary
-   `#include <zephyr/sys/printk.h>` in `pigeon/src/pigeon_core.c` — is
-   obsolete: pigeon `c9790f8` carries that include upstream, and the
-   workspace checkout has been on it since the 2026-07-31 sync.)
-4. **Once console output is confirmed working**, the pending verification
-   sequence is: boot → LTE attach → pigeon shadow sync (watch for
-   `pigeon_shadow_get`/`Stop ID updated to:` log lines) → telemetry keys
-   (`rsrp_dbm`/`uptime_s`/`swiftly_consecutive_failures`/
-   `swiftly_last_success_age_s`) actually landing in the dashboard — now
-   arriving as ONE batched report per poll cycle, so all four keys should
-   appear/refresh together, timestamped alike (all four are numeric strings,
-   so they show up in fancier's graph key-picker) → the money demo: pushing
-   a new `stop_id` via the shadow from the dashboard/API and confirming the
-   sign switches stops without a reflash.
+The sign's day job (Swiftly fetch → display) no longer shares a thread,
+a TLS stack, or a watchdog window with PidgeIoT:
+
+- All pigeon I/O runs on a dedicated prio-10 thread; main (prio 0) preempts
+  it at will. Boot arms the display timer before `pigeon_client_init()`,
+  which no longer blocks (its first shadow sync happens on the thread). An
+  unreachable `api.pidgeiot.com` cannot delay boot, stall the display loop,
+  or starve the 60s hardware watchdog.
+- Pigeon TLS runs **inside the modem** (cert provisioned via
+  `modem_key_mgmt` under sec tag 2, compare-before-write); Swiftly stays on
+  native mbedTLS. This fixed a latent 100%-failure (the modem cert store
+  was empty — pigeon TLS could never have handshaken as previously built)
+  AND removed the only shared resource (the 40KB mbedTLS heap is sized for
+  one connection).
+- Failed pigeon cycles back off to 2x then a capped 4x of the poll
+  interval; one successful round trip resets it. Shadow `"reboot": true`
+  fires only after its ack lands (no reboot loops against a half-reachable
+  platform). `CONFIG_PIGEON_REBOOT_ON_FATAL` was audited: it only overrides
+  `k_sys_fatal_error_handler()`, which connectivity errors cannot reach.
+- Main's loop idles via `k_sleep()` now, not `k_cpu_idle()` — the old spin
+  starved every lower-priority thread (this was also silently blocking any
+  deferred-mode logging from ever flushing).
+
+### Shadow `target_config` schema (task #1)
+
+`stop_id` is required for a config to apply; everything else is optional —
+an omitted key keeps the value currently in force (last applied, or the
+Kconfig default from boot). Out-of-range values are clamped and the ACK
+reports the clamped (i.e. real) value. Full example:
+
+```json
+{
+  "stop_id": "73",
+  "telemetry_interval": 300,
+  "update_stop_interval": 30,
+  "ntp_server_primary": "time.nist.gov",
+  "ntp_server_fallback": "us.pool.ntp.org",
+  "ntp_timeout_ms": 4000,
+  "ntp_retry_count": 2,
+  "http_retry_count": 1,
+  "reboot": false,
+  "firmware": { "version": "0.13.1", "size": 250000, "sha256": "<64 hex>" }
+}
+```
+
+Clamps: `update_stop_interval` 5–45s (the ceiling is the 60s hardware
+watchdog window — see `net/pigeon_client.c`), `ntp_timeout_ms` 500–30000,
+`ntp_retry_count` 1–5, `http_retry_count` 0–3. `reboot` is a one-shot
+command, never echoed in the ack. `firmware` drives FOTA (below).
+
+### Remote dictionary logs (task #2)
+
+Both profiles now run `CONFIG_LOG_MODE_DEFERRED` (minimal mode never
+dispatches to log backends at all) with `CONFIG_PIGEON_LOG_UPLOAD=y`:
+dictionary-encoded records batch up and POST to the pigeon's `/logs` ring
+buffer (≤5min cadence, 256B batch threshold; failed uploads drop that
+batch by design — this is an opportunistic debug channel). **The bench
+console stays human-readable in BOTH profiles** — dictionary encoding is
+per-backend, and the UART text backend is still enabled (verified in both
+built `.config`s); output is just flushed asynchronously now.
+
+Decoding needs the build's dictionary artifact:
+**`build_rebase_<profile>/app/zephyr/log_dictionary.json`** — regenerated
+every build and only valid for the image from that exact build; treat it
+as part of the flashed artifact set. To read logs in the dashboard, open
+the pigeon's Log Viewer and upload that file (platform task #5, live as of
+2026-08-01: `PUT /pigeons/:id/log-dictionary`, decoded stream renders
+inline with a "Decoded .txt" download; re-upload after every reflash).
+Host-side alternative: `zephyr/scripts/logging/dictionary/log_parser.py`.
+
+### FOTA (task #3)
+
+Shadow `firmware` target → chunked (1KiB) device-authed Range download
+into the external-flash MCUboot secondary slot → streamed sha256 verify →
+one-time test swap → graceful reboot. Runs on the pigeon thread; the
+display keeps updating throughout. Do not raise
+`CONFIG_PIGEON_FOTA_CHUNK_SIZE` past 2048 on this board (pigeon rides
+modem TLS; large responses hit the 2k modem recv limitation from the 2024
+JES_FOTA attempt).
+
+Test procedure (use the test pigeon, never the production one):
+
+1. Bump `app/VERSION` (e.g. PATCHLEVEL → `0.13.1`). CMake bakes this into
+   `CONFIG_PIGEON_FOTA_CURRENT_VERSION` automatically (generated conf
+   fragment — do NOT set it by hand; under sysbuild a plain CMake
+   `set(CONFIG_…)` is silently ignored, which is why it works this way).
+2. Build the release profile; the OTA artifact is
+   `build_rebase_release/app/zephyr/zephyr.signed.bin`.
+3. Upload it to the flock's firmware catalog in the dashboard under the
+   version string **exactly** `0.13.1` (must match step 1 byte-for-byte).
+4. Assign it to the pigeon (the dashboard's firmware-assign patches just
+   the shadow's `firmware` key).
+5. Within one poll interval the sign logs
+   `FOTA: downloading 0.13.1 (... attempt 1/3)`, streams ~200 chunks, then
+   `FOTA: image staged -- rebooting into MCUboot test swap`.
+6. The new image boots as a TEST swap. It becomes permanent only after its
+   first successful departure fetch (`confirm_image_if_healthy()`,
+   `fota.c`); its next shadow poll then acks the firmware key and the
+   dashboard shows converged. **The old image never pre-acks** — a
+   reverted swap leaves the shadow visibly unconverged, which is the truth.
+7. Safety rails to know about: per-version download attempts are capped at
+   3 and persist across reboots (settings/NVS `edb/fota/attempts`), so a
+   boot-looping image burns ≤3 downloads and stops; transient failures
+   take a 30min holdoff; a version change resets the budget.
+
+Two bench-behavior changes from the deferred confirm:
+
+- `newtmgr`-uploaded images are also test swaps now: an uploaded image
+  that never completes a departure fetch (e.g. no LTE at the bench)
+  REVERTS on the next reset. External-programmer (`west flash`) images are
+  unaffected.
+- The baked-token gotcha still applies: an OTA artifact carries
+  `CONFIG_PIGEON_TOKEN` from build time — rotate the token and the staged
+  image 401s forever; rebuild, don't re-upload.
+
+### West-update fragility (READ before any `west update`)
+
+1. `zephyr/soc/nordic/Kconfig` local patch (Setup step 10) — still
+   required, re-apply after every update. (The old pigeon printk patch is
+   obsolete; upstream since pigeon `c9790f8`.)
+2. **The workspace `pigeon/` checkout is TWO COMMITS AHEAD of its GitHub
+   `main`** (`ef5d980` SOCK_NATIVE_TLS opt-in — available but not used by
+   this board; `53c669e` `CONFIG_PIGEON_SHADOW_CONFIG_MAX` — REQUIRED,
+   both prj confs set it to 512). They exist only in `/home/justin/pigeon`
+   (local commits, not pushed — pushing is your call). Until they're
+   pushed, a `west update` reverts `pigeon/` to `c9790f8` and the build
+   fails loudly on the unknown `CONFIG_PIGEON_SHADOW_CONFIG_MAX` symbol;
+   recover with:
+   `cd pigeon && git fetch /home/justin/pigeon main && git checkout FETCH_HEAD`
+
+### Still outstanding for the bench
+
+1. **Console wiring physical check** (unchanged from the last handoff):
+   flashing works, but neither this firmware nor a stock hello_world
+   produces a byte on `/dev/ttyUSB0` — two independent images equally
+   silent points at the TX→CP2102N wiring, not software. Check first.
+2. **Reflash before verifying** — the board still carries the 2026-07-30
+   pre-refresh release image. Flash from `build_rebase_release/` (or
+   `_debug/`).
+3. **RAM is effectively full**: 98.8% (debug) / 98.7% (release) of the
+   app image's 128K region. Any new static allocation needs an explicit
+   offset; the levers already spent are listed in the task #2/#3 commit
+   messages.
+4. Verification sequence once console works: boot → LTE attach → shadow
+   sync (`Stop ID updated to:`) → the four telemetry keys landing batched
+   in the dashboard → push a new `stop_id` and watch the sign re-stop →
+   push an `update_stop_interval`/NTP change and watch the ack report the
+   applied values → upload `log_dictionary.json` and see decoded logs →
+   the FOTA procedure above → (deliberate) revert test: pull the antenna
+   after a swap boots and confirm MCUboot reverts on reset instead of
+   confirming a sign that can't fetch departures.
 
 ## Creating a Release
 Update the [VERSION file](https://github.com/umts/embedded-departure-board/blob/main/app/VERSION).
