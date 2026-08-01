@@ -37,12 +37,32 @@ void validate_image(void) {
   LOG_INF("Image Version %s", buf);
   rc = boot_is_img_confirmed();
   LOG_INF("Image is%s confirmed OK", rc ? "" : " not");
-  if (!rc) {
-    if (boot_write_img_confirmed()) {
-      LOG_ERR("Failed to confirm image");
-    } else {
-      LOG_INF("Marked image as OK");
-    }
+  /* Confirmation is deliberately NOT done here anymore (it used to be):
+   * confirming a test-swapped image at the top of boot -- before LTE, NTP,
+   * or a single successful departure fetch -- defeats MCUboot's revert
+   * safety net for exactly the images that need it (a FOTA'd build that
+   * boots but can't do its job). See confirm_image_if_healthy(). */
+}
+
+void confirm_image_if_healthy(void) {
+  static bool confirmed_this_boot;
+
+  if (confirmed_this_boot) {
+    return;
+  }
+  confirmed_this_boot = true;
+
+  if (boot_is_img_confirmed()) {
+    return;
+  }
+
+  if (boot_write_img_confirmed()) {
+    LOG_ERR("Failed to confirm image");
+    /* Leave confirmed_this_boot set: if the trailer write failed once,
+     * retrying every 30s won't fix flash -- and MCUboot reverting on the
+     * next reset is the designed safe outcome. */
+  } else {
+    LOG_INF("Marked image as OK");
   }
 }
 #endif  // CONFIG_BOOTLOADER_MCUBOOT

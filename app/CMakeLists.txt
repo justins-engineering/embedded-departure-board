@@ -12,6 +12,35 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/prj.local.conf)
   list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_SOURCE_DIR}/prj.local.conf)
 endif()
 
+# CONFIG_PIGEON_FOTA_CURRENT_VERSION must track this build's own version --
+# the pigeon library compares it byte-for-byte against the shadow firmware
+# target's version string, and a stale value either loops re-downloading the
+# already-running image or never converges (see pigeon's zephyr/Kconfig).
+# Derived here from the same VERSION file Zephyr's app-version machinery
+# reads, so there is exactly one place to bump and no second constant to
+# forget. Written as a generated conf fragment appended to EXTRA_CONF_FILE
+# (the prj.local.conf mechanism above) because that is the only assignment
+# path sysbuild honors: under sysbuild, plain CMake CONFIG_* set()s are
+# only consumed from the sysbuild cache (see zephyr/cmake/modules/
+# kconfig.cmake's SYSBUILD branch), never from the app CMakeLists. The
+# platform-side firmware catalog entry for an image built from this tree
+# must be uploaded under this exact MAJOR.MINOR.PATCHLEVEL string (see
+# README, FOTA test procedure).
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/VERSION edb_version_file)
+string(REGEX MATCH "VERSION_MAJOR *= *([0-9]+)" edb_unused "${edb_version_file}")
+set(edb_version_major ${CMAKE_MATCH_1})
+string(REGEX MATCH "VERSION_MINOR *= *([0-9]+)" edb_unused "${edb_version_file}")
+set(edb_version_minor ${CMAKE_MATCH_1})
+string(REGEX MATCH "PATCHLEVEL *= *([0-9]+)" edb_unused "${edb_version_file}")
+set(edb_version_patch ${CMAKE_MATCH_1})
+if(NOT (edb_version_major MATCHES "^[0-9]+$" AND edb_version_minor MATCHES "^[0-9]+$"
+        AND edb_version_patch MATCHES "^[0-9]+$"))
+  message(FATAL_ERROR "Could not parse MAJOR/MINOR/PATCHLEVEL out of app/VERSION")
+endif()
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/pigeon_fota_version.conf
+  "CONFIG_PIGEON_FOTA_CURRENT_VERSION=\"${edb_version_major}.${edb_version_minor}.${edb_version_patch}\"\n")
+list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_BINARY_DIR}/pigeon_fota_version.conf)
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(embedded-departure-board)
 

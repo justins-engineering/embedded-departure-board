@@ -9,6 +9,10 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/reboot.h>
 
+#if defined(CONFIG_PIGEON_FOTA)
+#include <zephyr/settings/settings.h>
+#endif
+
 #include "net/lte_manager.h"
 #include "runtime_config.h"
 #include "stop_id.h"
@@ -100,7 +104,21 @@ struct target_config_wire {
   int ntp_retry_count;
   int http_retry_count;
   bool reboot;
+#if defined(CONFIG_PIGEON_FOTA)
+  /* The shadow's optional "firmware" object (version/size/sha256, see
+   * capsules::FirmwareTarget) -- decoded straight into the same struct
+   * pigeon_fota_update_available()/pigeon_fota_apply() consume. */
+  struct pigeon_fota_info firmware;
+#endif
 };
+
+#if defined(CONFIG_PIGEON_FOTA)
+static const struct json_obj_descr firmware_descr[] = {
+    JSON_OBJ_DESCR_PRIM(struct pigeon_fota_info, version, JSON_TOK_STRING_BUF),
+    JSON_OBJ_DESCR_PRIM(struct pigeon_fota_info, size, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM(struct pigeon_fota_info, sha256, JSON_TOK_STRING_BUF),
+};
+#endif
 
 static const struct json_obj_descr target_config_descr[] = {
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, stop_id, JSON_TOK_STRING_BUF),
@@ -112,7 +130,15 @@ static const struct json_obj_descr target_config_descr[] = {
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, ntp_retry_count, JSON_TOK_NUMBER),
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, http_retry_count, JSON_TOK_NUMBER),
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, reboot, JSON_TOK_TRUE),
+#if defined(CONFIG_PIGEON_FOTA)
+    /* Keep last: TARGET_CONFIG_FW_BIT below assumes it. */
+    JSON_OBJ_DESCR_OBJECT(struct target_config_wire, firmware, firmware_descr),
+#endif
 };
+
+#if defined(CONFIG_PIGEON_FOTA)
+#define TARGET_CONFIG_FW_BIT BIT(ARRAY_SIZE(target_config_descr) - 1)
+#endif
 
 /* bit 0 = stop_id, bit 1 = telemetry_interval -- "reboot" (bit 2) is
  * deliberately optional to decode: a target_config with no reboot key at
@@ -121,6 +147,110 @@ static const struct json_obj_descr target_config_descr[] = {
  * useful, so it's the only one required for a target_config to count as
  * "applied" at all. */
 #define TARGET_CONFIG_REQUIRED_BITS 0x1
+
+#if defined(CONFIG_PIGEON_FOTA)
+
+/* Bounded FOTA retries, persistent across reboots: the attempt counter is
+ * bumped and saved to settings/NVS BEFORE each download, so even the worst
+ * failure shape -- an image that downloads and verifies fine, test-swaps,
+ * then boot-loops until MCUboot reverts to this build -- burns its budget
+ * and stops, instead of re-downloading a few hundred KB over LTE every
+ * poll interval forever. The counter clears once a matching version is
+ * seen actually running, or when the operator pushes a different target
+ * version. In-RAM holdoff spaces retries of transient (transport/verify)
+ * failures within one boot. */
+#define FOTA_MAX_ATTEMPTS_PER_VERSION 3
+#define FOTA_RETRY_HOLDOFF_MS (30 * 60 * 1000)
+
+struct fota_attempt_record {
+  char version[PIGEON_FOTA_VERSION_MAX];
+  uint8_t count;
+};
+
+static struct fota_attempt_record fota_attempts;
+static int64_t fota_holdoff_until_ms;
+
+static int fota_settings_set(const char* name, size_t len, settings_read_cb read_cb, void* cb_arg) {
+  const char* next;
+
+  if (settings_name_steq(name, "attempts", &next) && !next && len == sizeof(fota_attempts)) {
+    (void)read_cb(cb_arg, &fota_attempts, sizeof(fota_attempts));
+  }
+
+  return 0;
+}
+
+SETTINGS_STATIC_HANDLER_DEFINE(edb_fota, "edb/fota", NULL, fota_settings_set, NULL, NULL);
+
+enum fw_action {
+  FW_ACK_PLAIN,   /* no valid firmware target: ack without a firmware key */
+  FW_ACK_RUNNING, /* already running the target: ack echoes the firmware key */
+  FW_NO_ACK,      /* download pending/failed/held off: leave unconverged */
+  FW_REBOOT,      /* staged + scheduled: reboot into the test swap */
+};
+
+static enum fw_action handle_firmware_target(const struct pigeon_fota_info* info) {
+  /* The strpbrk arm keeps the ack's firmware echo JSON-safe, same policy
+   * as the stop_id/NTP strings in apply_target_config(). */
+  if (info->version[0] == '\0' || info->size <= 0 ||
+      strlen(info->sha256) != PIGEON_FOTA_SHA256_HEX_LEN ||
+      strpbrk(info->version, "\"\\") != NULL || strpbrk(info->sha256, "\"\\") != NULL) {
+    LOG_ERR("Shadow firmware target malformed (version/size/sha256); ignoring it");
+    return FW_ACK_PLAIN;
+  }
+
+  if (!pigeon_fota_update_available(info)) {
+    /* This build IS the target: a fresh arrival converges here, on its
+     * first shadow poll after the swap -- the ack is deliberately sent by
+     * the NEW image, never by the old one pre-reboot, so a reverted swap
+     * leaves the shadow visibly unconverged instead of lying. */
+    if (strcmp(fota_attempts.version, info->version) == 0 && fota_attempts.count > 0) {
+      fota_attempts.count = 0;
+      (void)settings_save_one("edb/fota/attempts", &fota_attempts, sizeof(fota_attempts));
+    }
+    return FW_ACK_RUNNING;
+  }
+
+  if (strcmp(fota_attempts.version, info->version) == 0 &&
+      fota_attempts.count >= FOTA_MAX_ATTEMPTS_PER_VERSION) {
+    LOG_WRN(
+        "FOTA: %s already attempted %u times (incl. across reboots); refusing until the "
+        "shadow targets a different version",
+        info->version, fota_attempts.count
+    );
+    return FW_NO_ACK;
+  }
+
+  if (k_uptime_get() < fota_holdoff_until_ms) {
+    return FW_NO_ACK;
+  }
+
+  if (strcmp(fota_attempts.version, info->version) != 0) {
+    snprintk(fota_attempts.version, sizeof(fota_attempts.version), "%s", info->version);
+    fota_attempts.count = 0;
+  }
+  fota_attempts.count++;
+  (void)settings_save_one("edb/fota/attempts", &fota_attempts, sizeof(fota_attempts));
+
+  LOG_WRN(
+      "FOTA: downloading %s (%d bytes, attempt %u/%u)", info->version, info->size,
+      fota_attempts.count, FOTA_MAX_ATTEMPTS_PER_VERSION
+  );
+
+  int err = pigeon_fota_apply(info);
+
+  if (err) {
+    LOG_ERR(
+        "FOTA: apply failed: %d (next attempt in >=%d min)", err, FOTA_RETRY_HOLDOFF_MS / 60000
+    );
+    fota_holdoff_until_ms = k_uptime_get() + FOTA_RETRY_HOLDOFF_MS;
+    return FW_NO_ACK;
+  }
+
+  return FW_REBOOT;
+}
+
+#endif /* CONFIG_PIGEON_FOTA */
 
 static void apply_target_config(const char* target_config, int32_t target_version) {
   /* Defaults preserved for any field the shadow's JSON doesn't include --
@@ -198,19 +328,70 @@ static void apply_target_config(const char* target_config, int32_t target_versio
   runtime_config_ntp_retry_count_set(cfg.ntp_retry_count);
   runtime_config_http_retry_count_set(cfg.http_retry_count);
 
+#if defined(CONFIG_PIGEON_FOTA)
+  bool ack_firmware = false;
+
+  if ((decoded & TARGET_CONFIG_FW_BIT) != 0) {
+    switch (handle_firmware_target(&cfg.firmware)) {
+      case FW_ACK_RUNNING:
+        ack_firmware = true;
+        break;
+      case FW_NO_ACK:
+        /* Leave the shadow unconverged on purpose: the runtime knobs
+         * above are applied (idempotent, they'll re-apply next poll),
+         * but acking now would tell the platform a firmware target was
+         * reached when it wasn't. */
+        LOG_WRN("FOTA pending/held off -- skipping shadow ack this poll");
+        return;
+      case FW_REBOOT:
+        /* Staged and scheduled. No ack from THIS image (see
+         * handle_firmware_target) -- tear down gracefully and boot the
+         * test swap; the new image acks once it proves out. */
+        LOG_WRN("FOTA: image staged -- rebooting into MCUboot test swap");
+        lte_disconnect();
+        sys_reboot(SYS_REBOOT_WARM);
+        break;
+      case FW_ACK_PLAIN:
+      default:
+        break;
+    }
+  }
+#endif /* CONFIG_PIGEON_FOTA */
+
   /* Ack the config actually applied (minus "reboot", see this file's
    * struct doc comment) -- APPLIED, not requested: clamped values are
    * acked clamped, so the dashboard sees what the device really runs. */
   char current_config[CONFIG_PIGEON_SHADOW_CONFIG_MAX];
-
-  snprintk(
+  size_t ack_len = snprintk(
       current_config, sizeof(current_config),
       "{\"stop_id\":\"%s\",\"telemetry_interval\":%d,\"update_stop_interval\":%d,"
       "\"ntp_server_primary\":\"%s\",\"ntp_server_fallback\":\"%s\",\"ntp_timeout_ms\":%d,"
-      "\"ntp_retry_count\":%d,\"http_retry_count\":%d}",
+      "\"ntp_retry_count\":%d,\"http_retry_count\":%d",
       cfg.stop_id, cfg.telemetry_interval, cfg.update_stop_interval, cfg.ntp_server_primary,
       cfg.ntp_server_fallback, cfg.ntp_timeout_ms, cfg.ntp_retry_count, cfg.http_retry_count
   );
+
+#if defined(CONFIG_PIGEON_FOTA)
+  if (ack_firmware && ack_len < sizeof(current_config)) {
+    ack_len += snprintk(
+        current_config + ack_len, sizeof(current_config) - ack_len,
+        ",\"firmware\":{\"version\":\"%s\",\"size\":%d,\"sha256\":\"%s\"}", cfg.firmware.version,
+        cfg.firmware.size, cfg.firmware.sha256
+    );
+  }
+#endif
+
+  if (ack_len < sizeof(current_config) - 1) {
+    current_config[ack_len] = '}';
+    current_config[ack_len + 1] = '\0';
+  } else {
+    /* Truncated ack would be invalid JSON; CONFIG_PIGEON_SHADOW_CONFIG_MAX
+     * is sized so this can't happen with in-range values -- treat it as a
+     * bug rather than sending garbage. */
+    LOG_ERR("Shadow ack overflowed its buffer (%u bytes); not reporting", (unsigned)ack_len);
+    return;
+  }
+
   int err = pigeon_shadow_report(target_version, current_config);
 
   if (err) {
@@ -348,6 +529,21 @@ void pigeon_client_init(void) {
       .device_id = "embedded-departure-board",
       .connector = {.type = PIGEON_CONNECTOR_HTTPS},
   };
+
+#if defined(CONFIG_PIGEON_FOTA)
+  /* Restore the persisted FOTA attempt record (see fota_attempt_record's
+   * doc) -- best-effort: a settings failure just means the counter
+   * restarts, never that the sign doesn't boot. */
+  int serr = settings_subsys_init();
+
+  if (serr == 0) {
+    serr = settings_load_subtree("edb/fota");
+  }
+
+  if (serr) {
+    LOG_WRN("FOTA attempt-record load failed: %d (starting fresh)", serr);
+  }
+#endif
 
   int err = pigeon_init(&config);
 

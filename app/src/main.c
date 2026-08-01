@@ -222,6 +222,16 @@ int main(void) {
        */
 #ifdef CONFIG_LIGHT_SENSOR
       ret = update_stop();
+
+#ifdef CONFIG_BOOTLOADER_MCUBOOT
+      /* First proven-working departure fetch (2 = success, empty stop):
+       * NOW a test-swapped image has earned permanent confirmation --
+       * see confirm_image_if_healthy()'s docs for the revert semantics. */
+      if ((ret == 0) || (ret == 2)) {
+        confirm_image_if_healthy();
+      }
+#endif  // CONFIG_BOOTLOADER_MCUBOOT
+
       if (ret == 0) {
         lux = get_lux();
         if (lux < 0) {
@@ -242,6 +252,10 @@ int main(void) {
       if (ret && (ret != 2)) {
         goto reset;
       }
+
+#ifdef CONFIG_BOOTLOADER_MCUBOOT
+      confirm_image_if_healthy();
+#endif  // CONFIG_BOOTLOADER_MCUBOOT
 #endif  // CONFIG_LIGHT_SENSOR
 
       ret = wdt_feed(wdt, wdt_channel_id);
