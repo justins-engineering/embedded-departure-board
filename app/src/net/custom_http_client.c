@@ -11,6 +11,7 @@
 #include <zephyr/storage/stream_flash.h>
 
 #include "net/lte_manager.h"
+#include "runtime_config.h"
 #include "stop_id.h"
 #include "watchdog_app.h"
 
@@ -394,7 +395,7 @@ clean_up:
     // Partial transefer complete; reconnect with new range request
     range_start = rc;
     goto retry;
-  } else if ((rc == -3) && (retry_client_error < CONFIG_HTTP_REQUEST_RETRY_COUNT)) {
+  } else if ((rc == -3) && (retry_client_error < runtime_config_http_retry_count())) {
     LOG_WRN("HTTP request GET %s%s failed, retrying...", hostname, path);
     retry_client_error++;
     goto retry;

@@ -3,17 +3,19 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+#include "runtime_config.h"
+
 LOG_MODULE_REGISTER(ntp);
 
 #define SNTP_PORT "123"
 
 struct sntp_time time_stamp;
 
-static int ntp_request(char *url) {
+static int ntp_request(const char* url, int timeout_ms) {
   int err;
   struct sntp_ctx ctx;
 
-  struct zsock_addrinfo *addr_inf;
+  struct zsock_addrinfo* addr_inf;
   static struct zsock_addrinfo hints = {.ai_socktype = SOCK_DGRAM, .ai_flags = AI_NUMERICSERV};
 
   err = zsock_getaddrinfo(url, SNTP_PORT, &hints, &addr_inf);
@@ -33,7 +35,7 @@ static int ntp_request(char *url) {
     goto end;
   }
 
-  err = sntp_query(&ctx, CONFIG_NTP_REQUEST_TIMEOUT_MS, &time_stamp);
+  err = sntp_query(&ctx, (uint32_t)timeout_ms, &time_stamp);
   if (err) {
     LOG_ERR("SNTP request failed: %d", err);
   }
@@ -44,27 +46,40 @@ end:
 }
 
 int get_ntp_time(void) {
-  int err;
+  /* -EINVAL survives only if the retry loop never runs -- can't happen
+   * with the setter-side clamp (retry count >= 1), but the compiler's
+   * analyzer can't see that. */
+  int err = -EINVAL;
+
+  /* Snapshotted per call: these are shadow-overridable (runtime_config.h),
+   * and the pigeon client thread may retune them between calls -- never
+   * mid-call. */
+  char primary[RUNTIME_NTP_SERVER_MAX_LEN];
+  char fallback[RUNTIME_NTP_SERVER_MAX_LEN];
+  int timeout_ms = runtime_config_ntp_timeout_ms();
+  int retry_count = runtime_config_ntp_retry_count();
+
+  runtime_config_ntp_servers_get(primary, sizeof(primary), fallback, sizeof(fallback));
 
   /* Get sntp time */
-  for (int rc = 0; rc < (CONFIG_NTP_FETCH_RETRY_COUNT * 2); rc++) {
-    if (rc < CONFIG_NTP_FETCH_RETRY_COUNT) {
-      err = ntp_request(CONFIG_PRIMARY_NTP_SERVER);
+  for (int rc = 0; rc < (retry_count * 2); rc++) {
+    if (rc < retry_count) {
+      err = ntp_request(primary, timeout_ms);
     } else {
-      err = ntp_request(CONFIG_FALLBACK_NTP_SERVER);
+      err = ntp_request(fallback, timeout_ms);
     }
 
-    if (err && (rc == (CONFIG_NTP_FETCH_RETRY_COUNT * 2) - 1)) {
+    if (err && (rc == (retry_count * 2) - 1)) {
       LOG_ERR(
           "Failed to get time from all NTP pools! Err: %i\n Check your network "
           "connection.",
           err
       );
-    } else if (err && (rc == CONFIG_NTP_FETCH_RETRY_COUNT - 1)) {
+    } else if (err && (rc == retry_count - 1)) {
       LOG_WRN(
-          "Unable to get time after %d tries from NTP "
-          "pool " CONFIG_PRIMARY_NTP_SERVER " . Err: %i\n Attempting to use fallback NTP pool...",
-          CONFIG_NTP_FETCH_RETRY_COUNT, err
+          "Unable to get time after %d tries from NTP pool %s. Err: %i\n Attempting to use "
+          "fallback NTP pool...",
+          retry_count, primary, err
       );
     } else if (err) {
       LOG_WRN("Failed to get time using SNTP, Err: %i. Retrying...", err);

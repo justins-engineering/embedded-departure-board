@@ -10,6 +10,7 @@
 #include <zephyr/sys/reboot.h>
 
 #include "net/lte_manager.h"
+#include "runtime_config.h"
 #include "stop_id.h"
 #include "update_stop.h"
 
@@ -53,20 +54,63 @@ static int applied_interval_s = CONFIG_PIGEON_CLIENT_POLL_INTERVAL_SECONDS;
 static unsigned int failed_cycles;
 static int64_t next_attempt_uptime_ms;
 
+/* Display refresh cadence currently in force -- runtime-overridable like
+ * the knobs in runtime_config.c, but applied here (it drives
+ * update_stop_timer directly) rather than read through a getter. Written
+ * on the pigeon thread only. */
+static int applied_update_stop_interval_s = CONFIG_UPDATE_STOP_FREQUENCY_SECONDS;
+
+/* Hard bounds on shadow-supplied update_stop_interval: the loop that runs
+ * update_stop() is also the loop that feeds the 60s hardware watchdog
+ * (CONFIG_MAX_TIME_INACTIVE_BEFORE_RESET_MS -- a wdt_install_timeout()
+ * window, fixed at boot, NOT shadow-tunable), and its feeds only happen on
+ * update_stop passes. An interval pushed past ~45s would idle main
+ * straight into a watchdog reset; a shadow must not be able to do that,
+ * so out-of-range values clamp (and the clamped value is what gets
+ * acked). The floor is Swiftly-API politeness. */
+#define UPDATE_STOP_INTERVAL_MIN_S 5
+#define UPDATE_STOP_INTERVAL_MAX_S 45
+
+/* Sanity bounds for the remaining int knobs; same clamp-and-ack policy. */
+#define NTP_TIMEOUT_MIN_MS 500
+#define NTP_TIMEOUT_MAX_MS 30000
+#define NTP_RETRY_MIN 1
+#define NTP_RETRY_MAX 5
+#define HTTP_RETRY_MIN 0
+#define HTTP_RETRY_MAX 3
+
+static int clamp_int(int value, int lo, int hi) {
+  return (value < lo) ? lo : ((value > hi) ? hi : value);
+}
+
 /* Mirrors pigeon-examples' https_init sample's shadow.c convention: the app
  * owns target_config's meaning, pigeon only stores/forwards the raw JSON
  * text (see pigeon_shadow_doc in pigeon.h). "reboot" is a one-shot command,
  * deliberately excluded from the persisted current_config we report back so
- * it doesn't refire on every poll after being applied once. */
+ * it doesn't refire on every poll after being applied once. Everything else
+ * here is a runtime-tunable operational knob whose Kconfig default is the
+ * boot-time fallback (stop_id.h / runtime_config.h). */
 struct target_config_wire {
   char stop_id[STOP_ID_MAX_LEN];
   int telemetry_interval;
+  int update_stop_interval;
+  char ntp_server_primary[RUNTIME_NTP_SERVER_MAX_LEN];
+  char ntp_server_fallback[RUNTIME_NTP_SERVER_MAX_LEN];
+  int ntp_timeout_ms;
+  int ntp_retry_count;
+  int http_retry_count;
   bool reboot;
 };
 
 static const struct json_obj_descr target_config_descr[] = {
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, stop_id, JSON_TOK_STRING_BUF),
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, telemetry_interval, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM(struct target_config_wire, update_stop_interval, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM(struct target_config_wire, ntp_server_primary, JSON_TOK_STRING_BUF),
+    JSON_OBJ_DESCR_PRIM(struct target_config_wire, ntp_server_fallback, JSON_TOK_STRING_BUF),
+    JSON_OBJ_DESCR_PRIM(struct target_config_wire, ntp_timeout_ms, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM(struct target_config_wire, ntp_retry_count, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_PRIM(struct target_config_wire, http_retry_count, JSON_TOK_NUMBER),
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, reboot, JSON_TOK_TRUE),
 };
 
@@ -85,9 +129,17 @@ static void apply_target_config(const char* target_config, int32_t target_versio
    * that omits a key means "keep what you have". */
   struct target_config_wire cfg = {
       .telemetry_interval = applied_interval_s,
+      .update_stop_interval = applied_update_stop_interval_s,
+      .ntp_timeout_ms = runtime_config_ntp_timeout_ms(),
+      .ntp_retry_count = runtime_config_ntp_retry_count(),
+      .http_retry_count = runtime_config_http_retry_count(),
       .reboot = false,
   };
   stop_id_get(cfg.stop_id, sizeof(cfg.stop_id));
+  runtime_config_ntp_servers_get(
+      cfg.ntp_server_primary, sizeof(cfg.ntp_server_primary), cfg.ntp_server_fallback,
+      sizeof(cfg.ntp_server_fallback)
+  );
 
   int64_t decoded = json_obj_parse(
       (char*)target_config, strlen(target_config), target_config_descr,
@@ -97,6 +149,25 @@ static void apply_target_config(const char* target_config, int32_t target_versio
   if (decoded < 0 || (decoded & TARGET_CONFIG_REQUIRED_BITS) != TARGET_CONFIG_REQUIRED_BITS) {
     LOG_ERR("Shadow target_config missing/invalid stop_id (decoded=%lld); not applying", decoded);
     return;
+  }
+
+  /* The ack below embeds these decoded strings back into raw JSON without
+   * an escaper -- a quote/backslash smuggled through a shadow value would
+   * make every ack invalid (never converging, re-applying each poll), so
+   * refuse such values outright rather than acking garbage. No real stop
+   * ID or hostname contains either character. */
+  if (strpbrk(cfg.stop_id, "\"\\") != NULL) {
+    LOG_ERR("Shadow stop_id contains JSON-unsafe characters; not applying");
+    return;
+  }
+
+  if (strpbrk(cfg.ntp_server_primary, "\"\\") != NULL ||
+      strpbrk(cfg.ntp_server_fallback, "\"\\") != NULL) {
+    LOG_ERR("Shadow NTP server contains JSON-unsafe characters; keeping current servers");
+    runtime_config_ntp_servers_get(
+        cfg.ntp_server_primary, sizeof(cfg.ntp_server_primary), cfg.ntp_server_fallback,
+        sizeof(cfg.ntp_server_fallback)
+    );
   }
 
   stop_id_set(cfg.stop_id);
@@ -109,13 +180,36 @@ static void apply_target_config(const char* target_config, int32_t target_versio
     );
   }
 
+  cfg.update_stop_interval =
+      clamp_int(cfg.update_stop_interval, UPDATE_STOP_INTERVAL_MIN_S, UPDATE_STOP_INTERVAL_MAX_S);
+  if (cfg.update_stop_interval != applied_update_stop_interval_s) {
+    LOG_INF("Shadow update_stop_interval: %ds", cfg.update_stop_interval);
+    applied_update_stop_interval_s = cfg.update_stop_interval;
+    k_timer_start(
+        &update_stop_timer, K_SECONDS(cfg.update_stop_interval), K_SECONDS(cfg.update_stop_interval)
+    );
+  }
+
+  cfg.ntp_timeout_ms = clamp_int(cfg.ntp_timeout_ms, NTP_TIMEOUT_MIN_MS, NTP_TIMEOUT_MAX_MS);
+  cfg.ntp_retry_count = clamp_int(cfg.ntp_retry_count, NTP_RETRY_MIN, NTP_RETRY_MAX);
+  cfg.http_retry_count = clamp_int(cfg.http_retry_count, HTTP_RETRY_MIN, HTTP_RETRY_MAX);
+  runtime_config_ntp_servers_set(cfg.ntp_server_primary, cfg.ntp_server_fallback);
+  runtime_config_ntp_timeout_ms_set(cfg.ntp_timeout_ms);
+  runtime_config_ntp_retry_count_set(cfg.ntp_retry_count);
+  runtime_config_http_retry_count_set(cfg.http_retry_count);
+
   /* Ack the config actually applied (minus "reboot", see this file's
-   * struct doc comment). */
-  char current_config[STOP_ID_MAX_LEN + 64];
+   * struct doc comment) -- APPLIED, not requested: clamped values are
+   * acked clamped, so the dashboard sees what the device really runs. */
+  char current_config[CONFIG_PIGEON_SHADOW_CONFIG_MAX];
 
   snprintk(
-      current_config, sizeof(current_config), "{\"stop_id\":\"%s\",\"telemetry_interval\":%d}",
-      cfg.stop_id, cfg.telemetry_interval
+      current_config, sizeof(current_config),
+      "{\"stop_id\":\"%s\",\"telemetry_interval\":%d,\"update_stop_interval\":%d,"
+      "\"ntp_server_primary\":\"%s\",\"ntp_server_fallback\":\"%s\",\"ntp_timeout_ms\":%d,"
+      "\"ntp_retry_count\":%d,\"http_retry_count\":%d}",
+      cfg.stop_id, cfg.telemetry_interval, cfg.update_stop_interval, cfg.ntp_server_primary,
+      cfg.ntp_server_fallback, cfg.ntp_timeout_ms, cfg.ntp_retry_count, cfg.http_retry_count
   );
   int err = pigeon_shadow_report(target_version, current_config);
 
