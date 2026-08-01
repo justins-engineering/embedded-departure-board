@@ -29,26 +29,30 @@ static const char swiftly_cert[] = {
 };
 
 #if defined(CONFIG_PIGEON)
-/* GTS Root R4 -- api.pidgeiot.com sits behind the Google Trust Services
- * chain, distinct from Swiftly's Amazon root, so it gets its own
- * array/sec_tag. */
+/* PidgeIoT CA bundle: GTS Root R4 + ISRG Root X1 + ISRG Root X2, three
+ * concatenated PEM roots in ONE CA-chain credential. Both PidgeIoT hosts
+ * (api.pidgeiot.com and the workers.dev staging endpoint) sit on
+ * Cloudflare, which does not guarantee a certificate authority across
+ * renewals -- today's chains root in GTS R4 (verified 2026-08-01: leaf <-
+ * WE1 <- GTS Root R4), but Cloudflare may reissue under Let's Encrypt
+ * (ISRG) at any ~90-day renewal, which would kill every pigeon TLS
+ * handshake fleet-wide -- including FOTA, the only remote fix path -- if
+ * only R4 were trusted. Distinct from Swiftly's Amazon root, so it keeps
+ * its own array/sec_tag. Must be PEM: the modem's %CMNG store rejects DER
+ * (found live on the bench -- see git history for the old r4.crt). */
 static const char pigeon_cert[] = {
-#include "r4.crt.hex"
+#include "pigeon-ca.crt.hex"
     IF_ENABLED(CONFIG_TLS_CREDENTIALS, (0x00))
 };
 #endif  // CONFIG_PIGEON
 
 #ifdef CONFIG_MODEM_KEY_MGMT
-// The total size of the included certificates must be less than 4KB
-BUILD_ASSERT(
-    (
-        sizeof(swiftly_cert)
+/* The modem's 4KB %CMNG cap is PER CREDENTIAL (each sec_tag's CA chain),
+ * not across all credentials -- the old combined assert under-budgeted. */
+BUILD_ASSERT(sizeof(swiftly_cert) < KB(4), "Swiftly CA certificate too large");
 #if defined(CONFIG_PIGEON)
-        + sizeof(pigeon_cert)
+BUILD_ASSERT(sizeof(pigeon_cert) < KB(4), "Pigeon CA bundle too large");
 #endif  // CONFIG_PIGEON
-    ) < KB(4),
-    "Certificates too large"
-);
 #endif
 
 K_SEM_DEFINE(lte_connected_sem, 1, 1);

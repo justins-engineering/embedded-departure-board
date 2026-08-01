@@ -138,12 +138,18 @@ a TLS stack, or a watchdog window with PidgeIoT:
   which no longer blocks (its first shadow sync happens on the thread). An
   unreachable `api.pidgeiot.com` cannot delay boot, stall the display loop,
   or starve the 60s hardware watchdog.
-- Pigeon TLS runs **inside the modem** (cert provisioned via
+- Pigeon TLS runs **inside the modem** (CA provisioned via
   `modem_key_mgmt` under sec tag 2, compare-before-write); Swiftly stays on
   native mbedTLS. This fixed a latent 100%-failure (the modem cert store
   was empty — pigeon TLS could never have handshaken as previously built)
-  AND removed the only shared resource (the 40KB mbedTLS heap is sized for
-  one connection).
+  AND removed the only shared resource (the mbedTLS heap is sized for
+  one connection). The provisioned credential is a **three-root PEM
+  bundle** (`keys/public/pigeon-ca.crt`: GTS Root R4 + ISRG Root X1 + X2):
+  Cloudflare doesn't guarantee a CA across ~90-day renewals, and a
+  GTS-only store would kill all pigeon TLS — including FOTA, the only
+  remote fix path — fleet-wide if it reissued under Let's Encrypt. Must
+  stay PEM; the modem `%CMNG` store rejects DER (bench-found, see git
+  history).
 - Failed pigeon cycles back off to 2x then a capped 4x of the poll
   interval; one successful round trip resets it. Shadow `"reboot": true`
   fires only after its ack lands (no reboot loops against a half-reachable

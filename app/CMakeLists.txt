@@ -49,7 +49,7 @@ set(gen_dir ${ZEPHYR_BINARY_DIR}/include/generated/)
 zephyr_include_directories(${gen_dir})
 
 foreach(inc_file
-  r4.crt
+  pigeon-ca.crt
   AmazonRootCA3.cer
 )
   generate_inc_file_for_target(
