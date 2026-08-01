@@ -373,6 +373,19 @@ retry:
   );
   if (rc == -1) {
     LOG_ERR("EOF or error in response headers.");
+    /* On this path headers_buf still holds the SENT request, credential
+     * included -- mask the Authorization value in place before dumping,
+     * so a console (or captured console log) never sees the API key. The
+     * buffer is rebuilt from scratch at the top of every (re)try, so
+     * mutating it here is safe. */
+    char* auth_value = strstr(headers_buf, "Authorization: ");
+
+    if (auth_value != NULL) {
+      for (auth_value += sizeof("Authorization: ") - 1;
+           (*auth_value != '\r') && (*auth_value != '\0'); auth_value++) {
+        *auth_value = '*';
+      }
+    }
     printk("%s\n", headers_buf);
     rc = -3;
   }
