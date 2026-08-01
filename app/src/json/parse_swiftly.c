@@ -35,8 +35,8 @@ LOG_MODULE_REGISTER(parse_swiftly);
 
 /** Iterates through the predictions array objects to find desired values. */
 static int parse_predictions(
-    const char *const json_ptr, int t, jsmntok_t tokens[], size_t array_size,
-    Destination *destination
+    const char* const json_ptr, int t, jsmntok_t tokens[], size_t array_size,
+    Destination* destination
 ) {
   /** The number of key-value pairs in a prediction object */
   int prediction_size;
@@ -116,6 +116,20 @@ static int parse_predictions(
             "                tripId: %.*s", tokens[t].end - tokens[t].start,
             json_ptr + tokens[t].start
         );
+      } else if (
+          jsoneq(json_ptr, &tokens[t], "occupancyPercent") ||
+          jsoneq(json_ptr, &tokens[t], "occupancyCount")
+      ) {
+        /* Known-but-unused keys Swiftly added mid-2026: accepted and
+         * ignored so every fetch doesn't emit unexpected-key warnings --
+         * which, with remote dictionary logging on, cost a log-upload
+         * batch per 30s fetch cycle in LTE data. Display/telemetry use of
+         * occupancy data is a deliberate product decision left open. */
+        t++;
+        LOG_DBG(
+            "                occupancy*: %.*s,", tokens[t].end - tokens[t].start,
+            json_ptr + tokens[t].start
+        );
       } else {
         LOG_WRN(
             "Unexpected key in predictions: %.*s,", tokens[t].end - tokens[t].start,
@@ -141,8 +155,8 @@ static int parse_predictions(
 
 /** Iterates through the destinations array objects to find desired values. */
 static int parse_destinations(
-    const char *const json_ptr, int t, jsmntok_t tokens[], size_t array_size,
-    PredictionsData *predictions_data
+    const char* const json_ptr, int t, jsmntok_t tokens[], size_t array_size,
+    PredictionsData* predictions_data
 ) {
   /** The number of key-value pairs in a destination object */
   int destination_size;
@@ -155,7 +169,7 @@ static int parse_destinations(
   t++;
 
   for (int dest_count = 0; dest_count < array_size; dest_count++) {
-    Destination *destination = &predictions_data->destinations[dest_count];
+    Destination* destination = &predictions_data->destinations[dest_count];
     destination->min = -1;
 
     // tokens[t].size is the number of key-value pairs in the object
@@ -214,7 +228,7 @@ static int parse_destinations(
 
 /** Iterates through the predictionsData array objects to find desired values. */
 static int parse_predictions_data(
-    const char *const json_ptr, int t, jsmntok_t tokens[], size_t array_size, Stop *stop
+    const char* const json_ptr, int t, jsmntok_t tokens[], size_t array_size, Stop* stop
 ) {
   /** The number of key-value pairs in a predictionsData object */
   int pdata_size;
@@ -227,7 +241,7 @@ static int parse_predictions_data(
   t++;
 
   for (int pdata_count = 0; pdata_count < array_size; pdata_count++) {
-    PredictionsData *predictions_data = &stop->predictions_data[pdata_count];
+    PredictionsData* predictions_data = &stop->predictions_data[pdata_count];
 
     // tokens[t].size is the number of key-value pairs in the object
     pdata_size = tokens[t].size;
@@ -306,7 +320,7 @@ static int parse_predictions_data(
 
 /** Iterates through the data array objects to find desired values. */
 static int parse_data(
-    const char *const json_ptr, int t, jsmntok_t tokens[], size_t data_size, Stop *stop
+    const char* const json_ptr, int t, jsmntok_t tokens[], size_t data_size, Stop* stop
 ) {
   /* tokens[t] is the data object, data_size == tokens[t].size (the number of key-value pairs in the
    * object), tokens[t + 1] is the first key.
@@ -340,7 +354,7 @@ static int parse_data(
   return t;
 }
 
-int parse_swiftly_json(const char *const json_ptr, Stop *stop) {
+int parse_swiftly_json(const char* const json_ptr, Stop* stop) {
   jsmn_parser p;
 
   /** The number of maximum possible tokens we expect in our JSON string */
