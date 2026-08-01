@@ -247,18 +247,21 @@ Two bench-behavior changes from the deferred confirm:
 
 ### West-update fragility (READ before any `west update`)
 
-1. `zephyr/soc/nordic/Kconfig` local patch (Setup step 10) — still
-   required, re-apply after every update. (The old pigeon printk patch is
-   obsolete; upstream since pigeon `c9790f8`.)
-2. **The workspace `pigeon/` checkout is TWO COMMITS AHEAD of its GitHub
-   `main`** (`ef5d980` SOCK_NATIVE_TLS opt-in — available but not used by
-   this board; `53c669e` `CONFIG_PIGEON_SHADOW_CONFIG_MAX` — REQUIRED,
-   both prj confs set it to 512). They exist only in `/home/justin/pigeon`
-   (local commits, not pushed — pushing is your call). Until they're
-   pushed, a `west update` reverts `pigeon/` to `c9790f8` and the build
-   fails loudly on the unknown `CONFIG_PIGEON_SHADOW_CONFIG_MAX` symbol;
-   recover with:
-   `cd pigeon && git fetch /home/justin/pigeon main && git checkout FETCH_HEAD`
+There are **zero required local patches to west-managed files** as of
+2026-08-01: the old `zephyr/soc/nordic/Kconfig` patch turned out not to
+be needed and was reverted (fresh clean-dir builds of both profiles
+confirm), and the old pigeon printk patch is upstream since pigeon
+`c9790f8`. One thing remains fragile:
+
+**The workspace `pigeon/` checkout is TWO COMMITS AHEAD of its GitHub
+`main`** (`ef5d980` SOCK_NATIVE_TLS opt-in — available but not used by
+this board; `53c669e` `CONFIG_PIGEON_SHADOW_CONFIG_MAX` — REQUIRED,
+both prj confs set it to 512). They exist only in `/home/justin/pigeon`
+(local commits, not pushed — pushing is your call). Until they're
+pushed, a `west update` reverts `pigeon/` to `c9790f8` and the build
+fails loudly on the unknown `CONFIG_PIGEON_SHADOW_CONFIG_MAX` symbol;
+recover with:
+`cd pigeon && git fetch /home/justin/pigeon main && git checkout FETCH_HEAD`
 
 ### Still outstanding for the bench
 
