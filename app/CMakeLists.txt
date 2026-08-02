@@ -50,7 +50,7 @@ zephyr_include_directories(${gen_dir})
 
 foreach(inc_file
   pigeon-ca.crt
-  AmazonRootCA3.cer
+  swiftly-ca.crt
 )
   generate_inc_file_for_target(
     app

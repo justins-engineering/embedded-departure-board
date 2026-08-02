@@ -22,11 +22,43 @@
 
 LOG_MODULE_REGISTER(lte_manager);
 
+/* Swiftly trust anchor: Amazon Root CA 3 (ECDSA P-256), as PEM -- the
+ * MAXIMAL set this image can load, not a minimal one. The complete
+ * published Amazon Trust Services rotation set (CA 1/2/3/4 + Starfield
+ * Services G2, every SPKI verified against amazontrust.com/repository)
+ * is staged in keys/public/swiftly-ca-full.crt but deliberately NOT
+ * compiled in: sockets_tls.c's tls_opt_sec_tag_list_set() runs
+ * tls_check_cert() -> mbedtls parse over every credential at socket
+ * setup. Two build-capability walls were hit live here (2026-08-02),
+ * both as boot-time day-job outages: (1) PEM parsing itself was absent
+ * (CONFIG_MBEDTLS_PEM_PARSE_C, now enabled in the board confs) -- the
+ * old anchor only ever worked because it was DER; (2) this build has no
+ * RSA (no MBEDTLS_RSA_C/PSA RSA) and no P-384/SHA-384, so CA 1/2/4/
+ * SFSG2 are not merely unusable for verification, they are UNPARSEABLE,
+ * and one unparseable root fails the whole sec-tag check with EINVAL,
+ * killing every Swiftly fetch. Activating the full set therefore
+ * REQUIRES the crypto enablement package (RSA + ECDHE_RSA suites;
+ * SECP_R1_384 + SHA_384 via TF-M) in the same change -- see the README
+ * rotation table. api.goswift.ly's
+ * live chain (leaf <- Amazon ECDSA 256 M01 <- Amazon Root CA 3,
+ * verified 2026-08-02) verifies against this anchor. No GTS root
+ * anywhere: no CT/doc evidence Swiftly ever served a Google chain. */
 static const char swiftly_cert[] = {
-#include "AmazonRootCA3.cer.hex"
+#include "swiftly-ca.crt.hex"
     // Null terminate certificate if running Mbed TLS
     IF_ENABLED(CONFIG_TLS_CREDENTIALS, (0x00))
 };
+
+#ifdef CONFIG_TLS_CREDENTIALS_BACKEND_PROTECTED_STORAGE
+/* Each credential in the protected-storage backend is one TF-M PS asset;
+ * an over-cap cert fails tls_credential_add() with -EIO at boot and takes
+ * the Swiftly day job down -- fail the BUILD instead (learned live, see
+ * the board conf comment). */
+BUILD_ASSERT(
+    sizeof(swiftly_cert) <= CONFIG_TFM_PS_MAX_ASSET_SIZE,
+    "Swiftly CA exceeds the protected-storage asset cap"
+);
+#endif  // CONFIG_TLS_CREDENTIALS_BACKEND_PROTECTED_STORAGE
 
 #if defined(CONFIG_PIGEON)
 /* PidgeIoT CA bundle: GTS Root R4 + ISRG Root X1 + ISRG Root X2, three
@@ -46,14 +78,13 @@ static const char pigeon_cert[] = {
 };
 #endif  // CONFIG_PIGEON
 
-#ifdef CONFIG_MODEM_KEY_MGMT
-/* The modem's 4KB %CMNG cap is PER CREDENTIAL (each sec_tag's CA chain),
- * not across all credentials -- the old combined assert under-budgeted. */
-BUILD_ASSERT(sizeof(swiftly_cert) < KB(4), "Swiftly CA certificate too large");
-#if defined(CONFIG_PIGEON)
-BUILD_ASSERT(sizeof(pigeon_cert) < KB(4), "Pigeon CA bundle too large");
-#endif  // CONFIG_PIGEON
-#endif
+#if defined(CONFIG_PIGEON) && defined(CONFIG_MODEM_KEY_MGMT)
+/* The modem's 4KB %CMNG cap is PER CREDENTIAL, and only the pigeon bundle
+ * is ever written to the modem -- Swiftly's bundle lives in the native
+ * store (no such cap) since the TLS split, so it is deliberately not
+ * asserted here. */
+BUILD_ASSERT(sizeof(pigeon_cert) < KB(4), "Pigeon CA bundle too large for the modem store");
+#endif  // CONFIG_PIGEON && CONFIG_MODEM_KEY_MGMT
 
 K_SEM_DEFINE(lte_connected_sem, 1, 1);
 

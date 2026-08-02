@@ -159,6 +159,25 @@ a TLS stack, or a watchdog window with PidgeIoT:
   starved every lower-priority thread (this was also silently blocking any
   deferred-mode logging from ever flushing).
 
+#### CA rotation survivability (trust bundles, 2026-08-02)
+
+Both TLS paths carry multi-root PEM bundles so a CA rotation at renewal
+is not an automatic outage. What each image can actually verify TODAY
+(from the built `.config`, not the datasheet):
+
+| Path | Bundle (`keys/public/`) | Usable today | Inert until config change |
+|---|---|---|---|
+| Pigeon (modem TLS, sec tag 2) | `pigeon-ca.crt`: GTS R4, ISRG X1, ISRG X2 | **all three** (modem has RSA + P-256 + P-384) | — |
+| Swiftly (native mbedTLS, sec tag 1) | Active: `swiftly-ca.crt` = **Amazon Root CA 3 only**. Full published ATS set staged in `swiftly-ca-full.crt` (CA 1–4 + Starfield G2, SPKI-verified against amazontrust.com), deliberately NOT compiled in | Amazon CA 3 (image has ECDHE_ECDSA + P-256 + SHA-256 only) | Activating `swiftly-ca-full.crt` is a PACKAGE, not a file swap: the socket's sec-tag check parses every root at setup and one UNPARSEABLE root bricks all Swiftly fetches (bench-verified) — so RSA (`MBEDTLS_RSA_C`/PSA RSA + ECDHE_RSA) and/or `SECP_R1_384`+`SHA_384` must land in the SAME change, plus the protected-storage caps (2KB/asset, 8KB partition, bench-verified too) require the volatile credential backend or a bigger PS partition |
+
+So: a Cloudflare CA switch on the PidgeIoT side is a non-event; an Amazon
+switch away from CA 3 (to RSA or P-384) still needs a Kconfig/TF-M crypto
+change — but only that, the trust store is already ready. No GTS root in
+the Swiftly bundle: no CT or documentation evidence was found that
+api.goswift.ly ever served a Google chain (checked 2026-08-02; crt.sh was
+down, Google CT API retired, web search clean — re-check crt.sh if this
+ever becomes load-bearing).
+
 ### Shadow `target_config` schema (task #1)
 
 `stop_id` is required for a config to apply; everything else is optional —
