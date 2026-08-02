@@ -13,6 +13,7 @@
 #include <zephyr/settings/settings.h>
 #endif
 
+#include "display_map.h"
 #include "net/lte_manager.h"
 #include "runtime_config.h"
 #include "stop_id.h"
@@ -94,6 +95,21 @@ static int clamp_int(int value, int lo, int hi) {
  * it doesn't refire on every poll after being applied once. Everything else
  * here is a runtime-tunable operational knob whose Kconfig default is the
  * boot-time fallback (stop_id.h / runtime_config.h). */
+/* One entry of the shadow's "displays" array -- 1-char keys keep a full
+ * 6-entry layout compact against CONFIG_PIGEON_SHADOW_CONFIG_MAX:
+ * {"r":"<route>","d":"<direction char>","p":<box position>}. */
+struct display_wire {
+  char r[DISPLAY_MAP_ROUTE_LEN + 3];
+  char d[2];
+  int p;
+};
+
+static const struct json_obj_descr display_entry_descr[] = {
+    JSON_OBJ_DESCR_PRIM(struct display_wire, r, JSON_TOK_STRING_BUF),
+    JSON_OBJ_DESCR_PRIM(struct display_wire, d, JSON_TOK_STRING_BUF),
+    JSON_OBJ_DESCR_PRIM(struct display_wire, p, JSON_TOK_NUMBER),
+};
+
 struct target_config_wire {
   char stop_id[STOP_ID_MAX_LEN];
   int telemetry_interval;
@@ -103,6 +119,8 @@ struct target_config_wire {
   int ntp_timeout_ms;
   int ntp_retry_count;
   int http_retry_count;
+  struct display_wire displays[CONFIG_NUMBER_OF_DISPLAY_BOXES];
+  size_t displays_len;
   bool reboot;
 #if defined(CONFIG_PIGEON_FOTA)
   /* The shadow's optional "firmware" object (version/size/sha256, see
@@ -129,6 +147,10 @@ static const struct json_obj_descr target_config_descr[] = {
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, ntp_timeout_ms, JSON_TOK_NUMBER),
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, ntp_retry_count, JSON_TOK_NUMBER),
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, http_retry_count, JSON_TOK_NUMBER),
+    JSON_OBJ_DESCR_OBJ_ARRAY(
+        struct target_config_wire, displays, CONFIG_NUMBER_OF_DISPLAY_BOXES, displays_len,
+        display_entry_descr, ARRAY_SIZE(display_entry_descr)
+    ),
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, reboot, JSON_TOK_TRUE),
 #if defined(CONFIG_PIGEON_FOTA)
     /* Keep last: TARGET_CONFIG_FW_BIT below assumes it. */
@@ -147,6 +169,10 @@ static const struct json_obj_descr target_config_descr[] = {
  * useful, so it's the only one required for a target_config to count as
  * "applied" at all. */
 #define TARGET_CONFIG_REQUIRED_BITS 0x1
+
+/* Descriptor-order bit of the "displays" array (KEEP IN SYNC with
+ * target_config_descr: stop_id=0 ... http_retry_count=7, displays=8). */
+#define TARGET_CONFIG_DISPLAYS_BIT BIT(8)
 
 #if defined(CONFIG_PIGEON_FOTA)
 
@@ -271,6 +297,21 @@ static void apply_target_config(const char* target_config, int32_t target_versio
       sizeof(cfg.ntp_server_fallback)
   );
 
+  /* Seed the displays array from the mapping currently in force, so an
+   * omitted "displays" key keeps it AND the ack always reports the
+   * effective layout (the whole point of the as-applied ack). */
+  struct display_map_entry cur_map[CONFIG_NUMBER_OF_DISPLAY_BOXES];
+  size_t cur_count = 0;
+
+  display_map_get(cur_map, &cur_count);
+  cfg.displays_len = cur_count;
+  for (size_t i = 0; i < cur_count; i++) {
+    snprintk(cfg.displays[i].r, sizeof(cfg.displays[i].r), "%s", cur_map[i].route);
+    cfg.displays[i].d[0] = cur_map[i].direction;
+    cfg.displays[i].d[1] = '\0';
+    cfg.displays[i].p = cur_map[i].position;
+  }
+
   int64_t decoded = json_obj_parse(
       (char*)target_config, strlen(target_config), target_config_descr,
       ARRAY_SIZE(target_config_descr), &cfg
@@ -328,6 +369,44 @@ static void apply_target_config(const char* target_config, int32_t target_versio
   runtime_config_ntp_retry_count_set(cfg.ntp_retry_count);
   runtime_config_http_retry_count_set(cfg.http_retry_count);
 
+  /* "displays": whole-array replacement, never a per-entry merge (the
+   * shadow carries the complete layout for a stop). Any invalid entry
+   * rejects the WHOLE array -- half a layout is worse than the old one --
+   * and the ack then echoes the unchanged effective mapping. */
+  if ((decoded & TARGET_CONFIG_DISPLAYS_BIT) != 0) {
+    struct display_map_entry new_map[CONFIG_NUMBER_OF_DISPLAY_BOXES];
+    bool displays_ok = (cfg.displays_len > 0);
+
+    for (size_t i = 0; displays_ok && i < cfg.displays_len; i++) {
+      const struct display_wire* w = &cfg.displays[i];
+
+      if (w->r[0] == '\0' || strlen(w->r) >= DISPLAY_MAP_ROUTE_LEN ||
+          strpbrk(w->r, "\"\\") != NULL || w->d[0] == '\0' || w->d[1] != '\0' ||
+          strpbrk(w->d, "\"\\") != NULL || w->p < 0 || w->p >= CONFIG_NUMBER_OF_DISPLAY_BOXES) {
+        displays_ok = false;
+        break;
+      }
+
+      snprintk(new_map[i].route, sizeof(new_map[i].route), "%s", w->r);
+      new_map[i].direction = w->d[0];
+      new_map[i].position = (uint8_t)w->p;
+    }
+
+    if (displays_ok) {
+      display_map_set(new_map, cfg.displays_len);
+      LOG_INF("Shadow displays: %u entries applied", (unsigned)cfg.displays_len);
+    } else {
+      LOG_ERR("Shadow displays array invalid; keeping current mapping");
+      cfg.displays_len = cur_count;
+      for (size_t i = 0; i < cur_count; i++) {
+        snprintk(cfg.displays[i].r, sizeof(cfg.displays[i].r), "%s", cur_map[i].route);
+        cfg.displays[i].d[0] = cur_map[i].direction;
+        cfg.displays[i].d[1] = '\0';
+        cfg.displays[i].p = cur_map[i].position;
+      }
+    }
+  }
+
 #if defined(CONFIG_PIGEON_FOTA)
   bool ack_firmware = false;
 
@@ -370,6 +449,23 @@ static void apply_target_config(const char* target_config, int32_t target_versio
       cfg.stop_id, cfg.telemetry_interval, cfg.update_stop_interval, cfg.ntp_server_primary,
       cfg.ntp_server_fallback, cfg.ntp_timeout_ms, cfg.ntp_retry_count, cfg.http_retry_count
   );
+
+  /* Effective route->display layout, always echoed (see the seeding
+   * comment above). */
+  if (ack_len < sizeof(current_config)) {
+    ack_len +=
+        snprintk(current_config + ack_len, sizeof(current_config) - ack_len, ",\"displays\":[");
+    for (size_t i = 0; i < cfg.displays_len && ack_len < sizeof(current_config); i++) {
+      ack_len += snprintk(
+          current_config + ack_len, sizeof(current_config) - ack_len,
+          "%s{\"r\":\"%s\",\"d\":\"%s\",\"p\":%d}", (i > 0) ? "," : "", cfg.displays[i].r,
+          cfg.displays[i].d, cfg.displays[i].p
+      );
+    }
+    if (ack_len < sizeof(current_config)) {
+      ack_len += snprintk(current_config + ack_len, sizeof(current_config) - ack_len, "]");
+    }
+  }
 
 #if defined(CONFIG_PIGEON_FOTA)
   if (ack_firmware && ack_len < sizeof(current_config)) {

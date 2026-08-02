@@ -205,6 +205,28 @@ watchdog window — see `net/pigeon_client.c`), `ntp_timeout_ms` 500–30000,
 `ntp_retry_count` 1–5, `http_retry_count` 0–3. `reboot` is a one-shot
 command, never echoed in the ack. `firmware` drives FOTA (below).
 
+**`displays` (added 2026-08-02): the route→display-box layout — the LAST
+per-stop compile-time knob.** With `stop_id` and `displays` both
+shadow-tunable, one firmware image serves any stop and the per-stop
+branch model (`stop_73`, `stop_1670`, …) is fully obsolete. Shape:
+
+```json
+"displays": [
+  { "r": "R29", "d": "1", "p": 0 },
+  { "r": "38",  "d": "1", "p": 1 },
+  { "r": "B43", "d": "0", "p": 2 }
+]
+```
+
+`r` = route id (≤4 chars), `d` = Swiftly directionId code (exactly one
+char), `p` = physical box position (0–5). Whole-array replacement, never
+a per-entry merge; any invalid entry rejects the entire array (a half
+layout is worse than the old one). Omitted key keeps the current mapping
+(boot default: the compile-time `DISPLAY_BOXES` table). The ack ALWAYS
+echoes the effective layout. Per-box color/brightness stay compile-time
+on purpose — brightness is a per-box power cap the shadow must never be
+able to raise (`update_stop.h`).
+
 ### Remote dictionary logs (task #2)
 
 Both profiles now run `CONFIG_LOG_MODE_DEFERRED` (minimal mode never

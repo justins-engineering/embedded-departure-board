@@ -5,6 +5,7 @@
 
 #include "display/display_switches.h"
 #include "display/led_display.h"
+#include "display_map.h"
 #include "json/parse_swiftly.h"
 #include "net/custom_http_client.h"
 #include "stop.h"
@@ -16,19 +17,33 @@ K_TIMER_DEFINE(update_stop_timer, update_stop_timeout_handler, NULL);
 
 K_SEM_DEFINE(update_stop_sem, 1, 1);
 
-static DisplayBox* get_display_address(
-    const DisplayBox display_boxes[], const char* route_id, const char direction_code
-) {
+/* Hardware parameters (brightness power cap, color) live in the static
+ * DISPLAY_BOXES table keyed by physical position; the route->position
+ * mapping itself is runtime (display_map.h, shadow-tunable). */
+static DisplayBox* box_params_for_position(const DisplayBox display_boxes[], uint8_t position) {
   for (size_t box = 0; box < CONFIG_NUMBER_OF_DISPLAY_BOXES; box++) {
-    if (!strncmp(route_id, display_boxes[box].id, 4) &&
-        (display_boxes[box].direction_code == direction_code)) {
+    if (display_boxes[box].position == position) {
       return &display_boxes[box];
     }
   }
   return NULL;
 }
 
-static int update_routes(Stop stop, DisplayBox display_boxes[]) {
+static DisplayBox* get_display_address(
+    const DisplayBox display_boxes[], const struct display_map_entry map[], size_t map_count,
+    const char* route_id, const char direction_code
+) {
+  for (size_t i = 0; i < map_count; i++) {
+    if (!strncmp(route_id, map[i].route, 4) && (map[i].direction == direction_code)) {
+      return box_params_for_position(display_boxes, map[i].position);
+    }
+  }
+  return NULL;
+}
+
+static int update_routes(
+    Stop stop, DisplayBox display_boxes[], const struct display_map_entry map[], size_t map_count
+) {
   unsigned int times[6] = {0};
 
   for (size_t box = 0; box < CONFIG_NUMBER_OF_DISPLAY_BOXES; box++) {
@@ -48,8 +63,9 @@ static int update_routes(Stop stop, DisplayBox display_boxes[]) {
         continue;
       }
 
-      DisplayBox* display =
-          get_display_address(display_boxes, prediction_data.route_id, destination.direction_id);
+      DisplayBox* display = get_display_address(
+          display_boxes, map, map_count, prediction_data.route_id, destination.direction_id
+      );
       if (display != NULL) {
         LOG_INF(
             "  Display address: %d, Direction Code: %c, Minutes to departure: %d",
@@ -127,7 +143,15 @@ int update_stop(void) {
     return 1;
   }
 
-  ret = update_routes(stop, display_boxes);
+  /* Snapshotted per pass, same cross-thread contract as stop_id: the
+   * pigeon client thread may swap the mapping between passes, never
+   * mid-pass. */
+  struct display_map_entry map[CONFIG_NUMBER_OF_DISPLAY_BOXES];
+  size_t map_count = 0;
+
+  display_map_get(map, &map_count);
+
+  ret = update_routes(stop, display_boxes, map, map_count);
   if (ret) {
     failure_streak++;
     return 1;
