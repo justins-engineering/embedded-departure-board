@@ -59,6 +59,36 @@ static int applied_interval_s = CONFIG_PIGEON_CLIENT_POLL_INTERVAL_SECONDS;
 static unsigned int failed_cycles;
 static int64_t next_attempt_uptime_ms;
 
+#if defined(CONFIG_PIGEON_FOTA)
+/* True while pigeon_fota_apply() is streaming chunks (set/cleared on the
+ * pigeon thread, read by main -- see pigeon_client_fota_active()). Left
+ * set through the staged-swap reboot on purpose: main's reset policy
+ * stays suppressed for the seconds between staging and restart.
+ *
+ * BOUNDED: the suppression self-expires after
+ * FOTA_SUPPRESSION_CEILING_MS even if the flag is still set -- a wedged
+ * download must never trade "reboots kill downloads" for "a wedged
+ * download disables the sign's self-recovery forever". The ceiling
+ * comfortably covers the slowest legitimate attempt (~25 min at 512B
+ * chunks on LTE-M plus the inter-chunk yield). */
+#define FOTA_SUPPRESSION_CEILING_MS (40 * 60 * 1000)
+
+static atomic_t fota_in_progress;
+static int64_t fota_active_since_ms;
+#endif
+
+bool pigeon_client_fota_active(void) {
+#if defined(CONFIG_PIGEON_FOTA)
+  if (atomic_get(&fota_in_progress) != 1) {
+    return false;
+  }
+
+  return (k_uptime_get() - fota_active_since_ms) < FOTA_SUPPRESSION_CEILING_MS;
+#else
+  return false;
+#endif
+}
+
 /* Display refresh cadence currently in force -- runtime-overridable like
  * the knobs in runtime_config.c, but applied here (it drives
  * update_stop_timer directly) rather than read through a getter. Written
@@ -263,9 +293,18 @@ static enum fw_action handle_firmware_target(const struct pigeon_fota_info* info
       fota_attempts.count, FOTA_MAX_ATTEMPTS_PER_VERSION
   );
 
+  /* Flag main BEFORE the first chunk: the download saturates LTE-M enough
+   * that the Swiftly fetch can fail both its tries, and main's reset-on-
+   * fetch-failure policy would otherwise reboot the board mid-download --
+   * the exact interaction that burned all three attempts of the first
+   * live OTA test (2026-08-02). See main.c's suppression check. */
+  fota_active_since_ms = k_uptime_get();
+  atomic_set(&fota_in_progress, 1);
+
   int err = pigeon_fota_apply(info);
 
   if (err) {
+    atomic_set(&fota_in_progress, 0);
     LOG_ERR(
         "FOTA: apply failed: %d (next attempt in >=%d min)", err, FOTA_RETRY_HOLDOFF_MS / 60000
     );

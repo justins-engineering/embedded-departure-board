@@ -239,6 +239,13 @@ int main(void) {
         }
       } else if (ret == 2) {
         lux = 0xFF;
+      } else if (pigeon_client_fota_active()) {
+        /* A FOTA download saturates the LTE link enough to fail Swiftly
+         * fetches; rebooting here would kill the download and burn a
+         * persisted attempt (it burned all three in the first live OTA
+         * test). Skip this cycle -- the display keeps its last state and
+         * the harsh reset policy resumes the moment the download ends. */
+        LOG_WRN("update_stop failed during FOTA download; skipping reset policy this cycle");
       } else {
         goto reset;
       }
@@ -250,7 +257,12 @@ int main(void) {
 #else
       ret = update_stop();
       if (ret && (ret != 2)) {
-        goto reset;
+        if (pigeon_client_fota_active()) {
+          /* See the CONFIG_LIGHT_SENSOR branch's comment. */
+          LOG_WRN("update_stop failed during FOTA download; skipping reset policy this cycle");
+        } else {
+          goto reset;
+        }
       }
 
 #ifdef CONFIG_BOOTLOADER_MCUBOOT

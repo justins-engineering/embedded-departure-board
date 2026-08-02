@@ -26,4 +26,17 @@
  */
 void pigeon_client_init(void);
 
+/** @brief Whether a FOTA download is currently streaming.
+ *
+ * Read by main's loop to SOFTEN (not remove) its reset-on-fetch-failure
+ * policy while an over-the-air download saturates the LTE link: a failed
+ * Swiftly cycle during a download logs and skips instead of rebooting,
+ * because the reboot kills the download and burns a persisted FOTA
+ * attempt (observed live: all 3 attempts of the first OTA test died this
+ * way). BOUNDED: self-expires ~40 min after download start even if the
+ * flag is stuck, so a wedged download can never disable the sign's
+ * self-recovery permanently. Always false when CONFIG_PIGEON_FOTA is
+ * off. Safe from any thread. */
+bool pigeon_client_fota_active(void);
+
 #endif  // PIGEON_CLIENT_H
