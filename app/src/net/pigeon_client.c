@@ -68,10 +68,14 @@ static int64_t next_attempt_uptime_ms;
  * BOUNDED: the suppression self-expires after
  * FOTA_SUPPRESSION_CEILING_MS even if the flag is still set -- a wedged
  * download must never trade "reboots kill downloads" for "a wedged
- * download disables the sign's self-recovery forever". The ceiling
- * comfortably covers the slowest legitimate attempt (~25 min at 512B
- * chunks on LTE-M plus the inter-chunk yield). */
-#define FOTA_SUPPRESSION_CEILING_MS (40 * 60 * 1000)
+ * download disables the sign's self-recovery forever". 60 min, sized
+ * from MEASURED reality, not the model: the first live 0.13.2 attempt
+ * ran ~2.9s/chunk under link contention (~46 min for a full 949-chunk
+ * image), so the original 40-min ceiling would have expired mid-download
+ * on an otherwise-succeeding attempt and let a late Swiftly hard-fail
+ * reboot it. 60 covers the measured worst case with margin while still
+ * bounding a genuinely wedged download. */
+#define FOTA_SUPPRESSION_CEILING_MS (60 * 60 * 1000)
 
 static atomic_t fota_in_progress;
 static int64_t fota_active_since_ms;
