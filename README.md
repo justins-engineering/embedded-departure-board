@@ -227,6 +227,11 @@ echoes the effective layout. Per-box color/brightness stay compile-time
 on purpose — brightness is a per-box power cap the shadow must never be
 able to raise (`update_stop.h`).
 
+**Verified end-to-end 2026-08-02** (shadow v4): stop 1670's real 3-route
+layout applied and echoed back exactly; unmapped positions stay dark by
+construction (`update_routes` turns every box off at the top of each pass
+and writes only mapped positions).
+
 ### Remote dictionary logs (task #2)
 
 Both profiles now run `CONFIG_LOG_MODE_DEFERRED` (minimal mode never
@@ -310,27 +315,82 @@ fails loudly on the unknown `CONFIG_PIGEON_SHADOW_CONFIG_MAX` symbol;
 recover with:
 `cd pigeon && git fetch /home/justin/pigeon main && git checkout FETCH_HEAD`
 
-### Still outstanding for the bench
+### Verification status (closed out 2026-08-03)
 
-1. **Console wiring physical check** (unchanged from the last handoff):
-   flashing works, but neither this firmware nor a stock hello_world
-   produces a byte on `/dev/ttyUSB0` — two independent images equally
-   silent points at the TX→CP2102N wiring, not software. Check first.
-2. **Reflash before verifying** — the board still carries the 2026-07-30
-   pre-refresh release image. Flash from `build_rebase_release/` (or
-   `_debug/`).
-3. **RAM is effectively full**: 98.8% (debug) / 98.7% (release) of the
-   app image's 128K region. Any new static allocation needs an explicit
-   offset; the levers already spent are listed in the task #2/#3 commit
-   messages.
-4. Verification sequence once console works: boot → LTE attach → shadow
-   sync (`Stop ID updated to:`) → the four telemetry keys landing batched
-   in the dashboard → push a new `stop_id` and watch the sign re-stop →
-   push an `update_stop_interval`/NTP change and watch the ack report the
-   applied values → upload `log_dictionary.json` and see decoded logs →
-   the FOTA procedure above → (deliberate) revert test: pull the antenna
-   after a swap boots and confirm MCUboot reverts on reset instead of
-   confirming a sign that can't fetch departures.
+Everything in the original bench plan has now been verified live:
+console (wiring + the TF-M-silence release-boot fix), shadow-driven
+`stop_id`/knob config with Kconfig fallbacks, batched telemetry at 300s
+cadence, dictionary log shipping, the shadow-push round trip
+(apply → as-applied ack → server-side convergence), the `displays`
+layout key, and a full FOTA cycle: catalog upload → shadow `firmware`
+target → 45m33s chunked download over LTE-M **with the day job running
+throughout** → MCUboot test swap (~49s) → 0.13.2 boot → deferred confirm
+on the first departure fetch → running-version ack 14s after boot.
+Post-OTA soak: ~31h, 1513 telemetry reports at unbroken cadence.
+
+#### OTA lessons (2026-08-02, all measured on hardware)
+
+- **Pacing**: ~2.9s per 512B chunk under real LTE-M contention — a
+  ~485KB image takes ~45 min, not the naive bandwidth estimate. Budget
+  OTA windows accordingly; late-evening/off-peak windows likely help
+  (the link visibly degraded — DNS timeouts on all hosts — after ~35 min
+  of sustained transfer, consistent with carrier-side throttling).
+- **The day job and a download fight for the link.** Without mitigation
+  the sign's reset-on-fetch-failure policy rebooted the board
+  mid-download three times in a row (burning the persisted 3-attempt
+  budget). Two-part fix, both live-verified: main softens (never
+  removes) the reset policy while `pigeon_client_fota_active()` — an
+  atomic flag **bounded by a 60-min self-expiring ceiling**, sized from
+  the measured pace, so a wedged download can never disable
+  self-recovery — and `CONFIG_PIGEON_FOTA_CHUNK_YIELD_MS=100` (pigeon
+  `174316e`) gives the day job periodic airtime. In the passing run the
+  suppression absorbed 9 Swiftly hard-fail cycles with zero reboots.
+- **Attempt accounting**: the per-version NVS counter is the real retry
+  bound — the 30-min in-RAM holdoff is wiped by any reboot (by design;
+  the counter, not the holdoff, is what stops reboot-loops). A version
+  that burns its 3 attempts is refused until the shadow targets a
+  DIFFERENT version string.
+- **Artifact-drift rule, binding from now on**: exactly one artifact per
+  version string, ever. The catalog's `0.13.2` (485719 B, `4d3aa3d4…`)
+  is authoritative and is what the board runs; the git tip builds a
+  different `0.13.2` binary that must never be uploaded — the next
+  shipped image is **`0.13.3`**.
+- **Sequencing** (by design, verified): a poll applies config keys
+  (stop_id, knobs, displays) BEFORE starting a firmware download, and
+  the ack for a firmware target is only ever sent by the image actually
+  running that version.
+
+#### Proposed next (not implemented)
+
+- **FOTA download resume** (pigeon repo, 0.13.3-era): persist
+  `{version, offset, sha256-stream-state}` across attempts, query the
+  written offset from `flash_img`/`dfu_target` on init, Range-GET from
+  the persisted offset, invalidate on version change. Today every
+  attempt restarts from byte 0 — the first failed 0.13.2 attempt threw
+  away 351KB (72%) of already-paid-for LTE data.
+- **Soften the day-job reset policy generally**: the 31h soak logged 8
+  Swiftly-double-failure reboots (each recovering in ~15s). Recovery
+  works, but a bounded retry/backoff before rebooting would cut the
+  churn; product call.
+
+#### Remaining open items (ranked)
+
+1. RAM is effectively full: debug 99.10% / release 99.01% of the 128K
+   app region. Diet before any further feature (per team agreement).
+2. Latent jsmn token-budget gap: a maximum-shaped Swiftly payload with
+   the 12-key predictions needs ~934 tokens vs the 742 budget →
+   parse-fail → reset loop on a very busy stop (see the 6295269 commit
+   message). Needs +3KB stack (doesn't fit) or a smaller
+   `STOP_MAX_ROUTES`; product/config call.
+3. Upstream filings worth making: the TF-M `TFM_LOG_LEVEL_SILENCE`
+   boot-kill (minimal repro exists: single-flag A/B on this board) and
+   pigeon's chunk-yield rationale.
+4. Swiftly full ATS trust-set activation is a documented package (see
+   the rotation table): crypto enablement + volatile credential backend
+   or bigger PS partition.
+5. Release-profile console shows only WRN+ — fine for the field;
+   `LOG_DEFAULT_LEVEL=3` needs the log-thread stack raised to 2048 in
+   the same change if ever wanted.
 
 ## Creating a Release
 Update the [VERSION file](https://github.com/umts/embedded-departure-board/blob/main/app/VERSION).
