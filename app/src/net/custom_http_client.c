@@ -57,7 +57,18 @@ int tls_setup(int fd, char* hostname, sec_tag_t sec_tag) {
     return err;
   }
 
-#ifdef CONFIG_MBEDTLS_SSL_CACHE_C
+  /* Unconditional, previously guarded by CONFIG_MBEDTLS_SSL_CACHE_C -- the
+   * wrong symbol: that is mbedTLS's SERVER-side session cache, never set in
+   * this build, so this block compiled out and every fetch paid a full
+   * handshake (cert chain + ECDHE) despite the code reading as if resumption
+   * were on. The CLIENT-side cache this option actually drives is Zephyr's
+   * own, always compiled into sockets_tls.c (client_cache[], gated only by
+   * NET_SOCKETS_TLS_MAX_CLIENT_SESSION_COUNT and per-socket by this exact
+   * sockopt -- see tls_session_save()/ztls_socket_data_check()). With it on,
+   * repeat connections to Swiftly resume via session ID/ticket
+   * (CONFIG_MBEDTLS_SSL_SESSION_TICKETS is already =y in the board conf):
+   * no certificate chain on the wire, one less round trip, less mbedTLS
+   * heap/CPU churn -- meaningful at this sign's 30s fetch cadence. */
   socklen_t session_cache = TLS_SESSION_CACHE_ENABLED;
 
   err = zsock_setsockopt(fd, SOL_TLS, TLS_SESSION_CACHE, &session_cache, sizeof(session_cache));
@@ -65,7 +76,6 @@ int tls_setup(int fd, char* hostname, sec_tag_t sec_tag) {
     LOG_ERR("Unable to set TLS session cache, Err: %s (%d)", strerror(errno), errno);
     return err;
   }
-#endif  // CONFIG_MBEDTLS_SSL_CACHE_C
 
   return EXIT_SUCCESS;
 }
