@@ -132,18 +132,22 @@ static int parse_predictions(
             "                tripId: %.*s", tokens[t].end - tokens[t].start,
             json_ptr + tokens[t].start
         );
-      } else if (
-          jsoneq(json_ptr, &tokens[t], "occupancyPercent") ||
-          jsoneq(json_ptr, &tokens[t], "occupancyCount")
-      ) {
-        /* Known-but-unused keys Swiftly added mid-2026: accepted and
-         * ignored so every fetch doesn't emit unexpected-key warnings --
-         * which, with remote dictionary logging on, cost a log-upload
-         * batch per 30s fetch cycle in LTE data. Display/telemetry use of
-         * occupancy data is a deliberate product decision left open. */
+      } else if (jsoneq(json_ptr, &tokens[t], "occupancyPercent")) {
+        /* Optional per-vehicle APC keys Swiftly added mid-2026 (used to be
+         * accept-and-ignore); -1-seeded in parse_destinations, so absent
+         * stays distinguishable from 0. Model-only: display/telemetry use
+         * is still an open product decision (stop.h). */
         t++;
+        destination->occupancy_percent = (int16_t)atoi(json_ptr + tokens[t].start);
         LOG_DBG(
-            "                occupancy*: %.*s,", tokens[t].end - tokens[t].start,
+            "                occupancyPercent: %.*s,", tokens[t].end - tokens[t].start,
+            json_ptr + tokens[t].start
+        );
+      } else if (jsoneq(json_ptr, &tokens[t], "occupancyCount")) {
+        t++;
+        destination->occupancy_count = (int16_t)atoi(json_ptr + tokens[t].start);
+        LOG_DBG(
+            "                occupancyCount: %.*s,", tokens[t].end - tokens[t].start,
             json_ptr + tokens[t].start
         );
       } else {
@@ -187,6 +191,8 @@ static int parse_destinations(
   for (int dest_count = 0; dest_count < array_size; dest_count++) {
     Destination* destination = &predictions_data->destinations[dest_count];
     destination->min = -1;
+    destination->occupancy_percent = -1;
+    destination->occupancy_count = -1;
 
     // tokens[t].size is the number of key-value pairs in the object
     destination_size = tokens[t].size;

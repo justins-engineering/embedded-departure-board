@@ -375,20 +375,33 @@ Post-OTA soak: ~31h, 1513 telemetry reports at unbroken cadence.
 
 #### Remaining open items (ranked)
 
-1. RAM is effectively full: debug 99.10% / release 99.01% of the 128K
-   app region. Diet before any further feature (per team agreement).
-2. Latent jsmn token-budget gap: a maximum-shaped Swiftly payload with
-   the 12-key predictions needs ~934 tokens vs the 742 budget →
-   parse-fail → reset loop on a very busy stop (see the 6295269 commit
-   message). Needs +3KB stack (doesn't fit) or a smaller
-   `STOP_MAX_ROUTES`; product/config call.
-3. Upstream filings worth making: the TF-M `TFM_LOG_LEVEL_SILENCE`
+1. ~~RAM is effectively full~~ CLOSED 2026-08-08: measured-watermark
+   diet landed (see the `RAM diet:` commit) — debug 89.83% / release
+   89.73%, evidence table in the commit message.
+2. ~~Latent jsmn token-budget gap~~ CLOSED 2026-08-08: jsmntok_t packed
+   to 8B funds the full 934-token max-shape budget (see the
+   `swiftly: pack jsmn tokens` commit). Residual, by config design: a
+   stop served by MORE than `STOP_MAX_ROUTES` (5) routes still
+   token-exhausts and fails the fetch cycle — raising it costs
+   ~187 tokens (~1.5KB of main stack) per extra route.
+3. Occupancy data (`occupancyPercent`/`occupancyCount`) is parsed into
+   the model (`Destination.occupancy_{percent,count}`, -1 = absent —
+   optional per-vehicle APC fields, present only when the predicted
+   vehicle reports passenger counts; `occupancyStatus`, the string-enum
+   sibling, stays accept-and-ignore). NOT yet surfaced anywhere:
+   display use and/or telemetry export are open product decisions.
+4. First shadow poll right after LTE attach can fail parse (-22,
+   partial body) and self-heals on the next cycle — observed on the
+   bench 2026-08-08, cosmetic at the 5-min poll cadence. Candidate for
+   root-cause during the 0.13.4 leg (smells like recv-loop termination
+   during slow first RRC/TLS warm-up).
+5. Upstream filings worth making: the TF-M `TFM_LOG_LEVEL_SILENCE`
    boot-kill (minimal repro exists: single-flag A/B on this board) and
    pigeon's chunk-yield rationale.
-4. Swiftly full ATS trust-set activation is a documented package (see
+6. Swiftly full ATS trust-set activation is a documented package (see
    the rotation table): crypto enablement + volatile credential backend
    or bigger PS partition.
-5. Release-profile console shows only WRN+ — fine for the field;
+7. Release-profile console shows only WRN+ — fine for the field;
    `LOG_DEFAULT_LEVEL=3` needs the log-thread stack raised to 2048 in
    the same change if ever wanted.
 
