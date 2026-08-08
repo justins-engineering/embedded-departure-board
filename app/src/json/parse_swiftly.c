@@ -13,9 +13,17 @@
 LOG_MODULE_REGISTER(parse_swiftly);
 
 /** Total expected tokens for "predictions" array
- * 8 key tokens + 8 value tokens + 1 object token + 1 array token = 18 tokens
+ * 12 key tokens + 12 value tokens + 1 object token + 1 array token = 26
+ * tokens -- Swiftly's mid-2026 payload carries up to 12 keys per
+ * prediction (time/sec/min/departure/blockId/delayed/scheduleBased/
+ * occupancyStatus/vehicleId/tripId/occupancyPercent/occupancyCount).
+ * The old budget of 18 (8 pairs) made a maximum-shape payload overflow
+ * the token pool: jsmn returns NOMEM, update_stop() fails, and main's
+ * policy turns that into a reset -- a latent reset-loop on a busy stop
+ * (documented in 6295269, closed here). Affordable on main's stack only
+ * because jsmntok_t is packed to 8 bytes (see jsmn.h).
  */
-#define PREDICTIONS_TOK_COUNT 18
+#define PREDICTIONS_TOK_COUNT 26
 
 /** Total expected tokens for "destinations" array
  * 3 key tokens + 3 value tokens + 1 object token + 1 array token = 8 tokens
@@ -32,6 +40,14 @@ LOG_MODULE_REGISTER(parse_swiftly);
  * 3 key tokens + 3 value tokens = 6 tokens
  */
 #define STOP_TOK_COUNT (6 + (CONFIG_STOP_MAX_ROUTES * PREDICTIONS_DATA_TOK_COUNT))
+
+/* The packed jsmntok_t (jsmn.h) narrows start/end/size to int16_t; both
+ * assumptions it rests on are enforced here, where the token array is
+ * actually sized. */
+BUILD_ASSERT(CONFIG_STOP_JSON_BUF_SIZE <= INT16_MAX, "jsmn int16 offsets need a <=32767B buffer");
+BUILD_ASSERT(
+    sizeof(jsmntok_t) == 8, "jsmntok_t packing regressed; STOP_TOK_COUNT stack math is off"
+);
 
 /** Iterates through the predictions array objects to find desired values. */
 static int parse_predictions(
