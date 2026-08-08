@@ -121,7 +121,11 @@ int update_stop(void) {
   static Stop stop = {.id = current_stop_id};
   static const DisplayBox display_boxes[] = DISPLAY_BOXES;
 
-  static char headers_buf[2048];
+  /* 1024 (was 2048, RAM diet 2026-08-08): holds the OUTGOING request
+   * (~300B, built in place by send_http_request) and then the response
+   * header block (Swiftly via CloudFront: ~600-800B observed). Overflow
+   * is now a bounded, logged error (parse_headers), not a buffer walk. */
+  static char headers_buf[1024];
 
   /** HTTP response body buffer with size defined by the
    * CONFIG_STOP_JSON_BUF_SIZE

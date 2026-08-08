@@ -118,6 +118,15 @@ static int parse_headers(int* sock, char* headers_buf, int headers_buf_size) {
   size_t headers_offset = 0;
 
   do {
+    /* Bounds check (added with the RAM diet, 2026-08-08): this loop had
+     * NONE -- a response with a header block larger than headers_buf
+     * walked straight past the buffer into adjacent statics. -1 leaves
+     * room for the NUL written after the terminator match below. */
+    if (headers_offset >= (size_t)headers_buf_size - 1) {
+      LOG_ERR("Response headers exceed %d-byte buffer", headers_buf_size);
+      return -5;
+    }
+
     bytes = zsock_recv(*sock, &headers_buf[headers_offset], 1, 0);
     if (bytes < 0) {
       LOG_ERR("recv() headers failed. Err %d: %s", errno, strerror(errno));
