@@ -11,11 +11,27 @@
 #include <zephyr/storage/stream_flash.h>
 
 #include "net/lte_manager.h"
+#include "net/pigeon_client.h"
 #include "runtime_config.h"
 #include "stop_id.h"
 #include "watchdog_app.h"
 
 LOG_MODULE_REGISTER(custom_http_client);
+
+#if defined(CONFIG_LTE_RAI_REQ)
+/* Floor on the fetch cadence below which end-of-data RAI is NOT asserted.
+ * US LTE-M carriers hold RRC connected for a ~10-20s inactivity timer
+ * after the last packet. Above this floor the network releases between
+ * fetches anyway, so RAI only trims the dead connected-mode tail -- a
+ * pure win (same one service request per fetch, seconds less airtime).
+ * BELOW the carrier's timer the connection would have stayed warm across
+ * fetches for free, and forcing a release would ADD an RRC setup per
+ * fetch -- at the shadow-clamped 5s minimum that is ~17k extra setups a
+ * day, the exact signaling load AS-RAI exists to avoid. 15s splits the
+ * observed timer range; if the bench's %CONEVAL/+CSCON measurement pins
+ * this carrier's timer, tune this to sit just above it. */
+#define RAI_MIN_FETCH_INTERVAL_S 15
+#endif  // CONFIG_LTE_RAI_REQ
 
 static const char swiftly_api_key[] = {
 #include "../keys/private/swiftly-api.key"
@@ -399,6 +415,32 @@ retry:
     printk("%s\n", headers_buf);
     rc = -3;
   }
+
+#if defined(CONFIG_LTE_RAI_REQ)
+  /* End-of-data release assistance, only when this cycle is truly done:
+   * a complete response is in (rc == EXIT_SUCCESS here can't mean the
+   * send-failure goto -- that jumps straight to clean_up below) and no
+   * retry/redirect/range continuation will follow. RAI_LAST rather than
+   * RAI_NO_DATA, deliberately: the socket still has exactly one uplink
+   * left -- zsock_close()'s TLS close_notify record -- and RAI_LAST
+   * ("idle after the next output operation completes") sequences the RRC
+   * release AFTER it, where NO_DATA ("release now") would race our own
+   * teardown bytes into a fresh RRC setup. On the plain-HTTP redirect
+   * path there is no close_notify, the hint just never fires, and the
+   * carrier's inactivity timer applies as before -- never worse than
+   * today. Skipped while a FOTA download streams (its per-chunk
+   * connections on the pigeon thread need the link held), and below
+   * RAI_MIN_FETCH_INTERVAL_S (see its comment). */
+  if ((rc == EXIT_SUCCESS) && !pigeon_client_fota_active() &&
+      (pigeon_client_update_stop_interval_s() >= RAI_MIN_FETCH_INTERVAL_S)) {
+    int rai_option = RAI_LAST;
+
+    err = zsock_setsockopt(sock, SOL_SOCKET, SO_RAI, &rai_option, sizeof(rai_option));
+    if (err) {
+      LOG_WRN("Failed to set SO_RAI, Err: %s (%d)", strerror(errno), errno);
+    }
+  }
+#endif  // CONFIG_LTE_RAI_REQ
 
 clean_up:
   LOG_DBG("Closing socket %d", sock);

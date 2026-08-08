@@ -39,4 +39,14 @@ void pigeon_client_init(void);
  * off. Safe from any thread. */
 bool pigeon_client_fota_active(void);
 
+/** @brief The update_stop (Swiftly fetch) interval currently in force, in
+ * seconds -- CONFIG_UPDATE_STOP_FREQUENCY_SECONDS until a shadow supplies
+ * update_stop_interval (clamped 5-45s, see pigeon_client.c).
+ *
+ * Read by custom_http_client.c's RAI end-of-data signaling: whether an
+ * early RRC release helps or thrashes depends on how the fetch cadence
+ * compares to the carrier's own inactivity timer. Plain aligned int read,
+ * written on the pigeon thread only -- safe from any thread. */
+int pigeon_client_update_stop_interval_s(void);
+
 #endif  // PIGEON_CLIENT_H
