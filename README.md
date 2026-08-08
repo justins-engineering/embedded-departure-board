@@ -113,7 +113,7 @@ This repo includes `.vscode/tasks.json` to make develpoment easier. The included
 
 ## PidgeIoT integration (`pigeon-integration` branch) — bench-day handoff
 
-This branch bumps NCS to 3.4.0 and makes the board a managed PidgeIoT device
+This branch makes the board a managed PidgeIoT device
 — see the branch's commit messages for the full design writeups (they carry
 the file:line traces). History: 2026-07-29 synced pigeon `9bb5117`→`0db1214`
 and settled the `CONFIG_PIGEON_WATCHDOG`-off decision (see
