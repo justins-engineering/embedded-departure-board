@@ -116,13 +116,17 @@ config PIGEON_CLIENT_POLL_INTERVAL_SECONDS
 
 config PIGEON_CLIENT_THREAD_STACK_SIZE
   int "Pigeon client thread stack size (bytes)"
-  default 6144
+  default 5632
   help
     Stack for the dedicated thread all PidgeIoT I/O runs on (see
     net/pigeon_client.c) -- sized for the pigeon library's HTTPS client
     plus JSON shadow decode, NOT for a TLS handshake: pigeon's sockets
-    are plain offloaded IPPROTO_TLS_1_2, so the handshake runs inside the
-    modem, never on this stack (contrast CONFIG_PIGEON_WS_THREAD_STACK_SIZE's
-    8192, which does budget for an on-CPU mbedTLS handshake).
+    are plain offloaded IPPROTO_TLS_1_2, so the handshake runs inside
+    the modem, never on this stack. Evidence (2026-08-08 RAM diet):
+    thread-analyzer peak 3112 on a full shadow+telemetry cycle; the
+    FOTA path (dfu_target/flash_img frames on top) ran two complete
+    real downloads within the earlier 6144 -- 5632 keeps >=1KB over a
+    conservative FOTA estimate. Bump back first if a FOTA soak ever
+    shows an MPU stack fault on this thread.
 
 endmenu
