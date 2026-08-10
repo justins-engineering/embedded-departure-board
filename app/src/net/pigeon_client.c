@@ -321,7 +321,14 @@ static enum fw_action handle_firmware_target(const struct pigeon_fota_info* info
 
 #endif /* CONFIG_PIGEON_FOTA */
 
-static void apply_target_config(const char* target_config, int32_t target_version) {
+/* honor_reboot=false is the boot-seed path (see pigeon_client_cycle): a
+ * CONVERGED shadow may still carry "reboot": true from a long-acked
+ * operator command, and honoring it while re-applying at every boot would
+ * turn that one command into a permanent boot->apply->reboot loop. A real
+ * (unconverged) push honors it as before, deferred until the ack lands. */
+static void apply_target_config(
+    const char* target_config, int32_t target_version, bool honor_reboot
+) {
   /* Defaults preserved for any field the shadow's JSON doesn't include --
    * json_obj_parse() only writes fields it actually decodes. Seeded from
    * the values currently in force (not the CONFIG defaults), so a shadow
@@ -373,6 +380,10 @@ static void apply_target_config(const char* target_config, int32_t target_versio
   if (strpbrk(cfg.stop_id, "\"\\") != NULL) {
     LOG_ERR("Shadow stop_id contains JSON-unsafe characters; not applying");
     return;
+  }
+
+  if (!honor_reboot) {
+    cfg.reboot = false;
   }
 
   if (strpbrk(cfg.ntp_server_primary, "\"\\") != NULL ||
@@ -611,6 +622,19 @@ static int report_telemetry(void) {
   return err;
 }
 
+/* True once a fetched target_config has been applied this boot. Before
+ * that, even a CONVERGED shadow (target_version == current_version) gets
+ * applied: convergence is the PLATFORM's memory of what some past image
+ * acked, and this boot may know none of it -- an --erase reflash, a
+ * replaced board, or NVS loss otherwise runs Kconfig defaults forever
+ * while the dashboard shows a fully-converged shadow (bench-observed
+ * 2026-08-08: stop 73 instead of the shadow's 1670 after every diag
+ * flash). Applying is idempotent (clamp + as-applied ack; re-acking an
+ * identical config just refreshes the shadow's updated_at server-side,
+ * same as any report-back), EXCEPT the reboot one-shot, which the
+ * boot-seed path masks -- see apply_target_config. */
+static bool boot_config_seeded;
+
 /* One shadow sync + telemetry report cycle.
  * @return 0 if at least one request completed a round trip to the
  * platform this cycle (i.e. PidgeIoT is reachable), negative otherwise. */
@@ -620,8 +644,18 @@ static int pigeon_client_cycle(void) {
 
   if (err) {
     LOG_ERR("pigeon_shadow_get failed: %d", err);
-  } else if (shadow.target_version != shadow.current_version) {
-    apply_target_config(shadow.target_config, shadow.target_version);
+  } else {
+    bool unconverged = shadow.target_version != shadow.current_version;
+
+    /* target_version 0 is a pristine shadow ('{}' -- nothing ever pushed;
+     * the platform bumps the version on the first real target_config
+     * write): there is nothing to seed from it, and "applying" it would
+     * only LOG_ERR about the missing stop_id on a fresh pigeon's every
+     * boot. */
+    if (unconverged || (!boot_config_seeded && shadow.target_version != 0)) {
+      apply_target_config(shadow.target_config, shadow.target_version, unconverged);
+    }
+    boot_config_seeded = true;
   }
 
   int telemetry_err = report_telemetry();

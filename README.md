@@ -205,6 +205,16 @@ watchdog window — see `net/pigeon_client.c`), `ntp_timeout_ms` 500–30000,
 `ntp_retry_count` 1–5, `http_retry_count` 0–3. `reboot` is a one-shot
 command, never echoed in the ack. `firmware` drives FOTA (below).
 
+**Boot-apply (2026-08-09):** the first successful shadow fetch after boot
+applies `target_config` even when the shadow is CONVERGED —
+convergence is the platform's memory of what some past image acked,
+which a fresh boot (erase-reflash, replaced board, NVS loss) doesn't
+share; without this the device runs Kconfig defaults forever under a
+dashboard showing converged. Two guards: the `reboot` one-shot is
+masked on that path (a converged shadow can still carry a long-acked
+`"reboot": true`, which must not refire every boot), and a pristine
+shadow (`target_version` 0, nothing ever pushed) is skipped outright.
+
 **`displays` (added 2026-08-02): the route→display-box layout — the LAST
 per-stop compile-time knob.** With `stop_id` and `displays` both
 shadow-tunable, one firmware image serves any stop and the per-stop
