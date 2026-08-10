@@ -128,6 +128,17 @@ artifacts for the bench: **`build_rebase_debug/` and
 after every commit). Older `./build`, `build_debug/`, `build_release/`
 dirs predate all of this.
 
+**0.13.3 production cutover (2026-08-10)** — the first image on the
+production pigeon identity. Carries the RAM diet + jsmn packing,
+occupancy in the model, boot-apply of converged shadows, and the LTE
+power configuration (merged from `pigeon-integration-lte`; bench
+results below). Workspace `pigeon/` builds at `ea1937a` — FOTA download
+resume is in the library but **stays off** here
+(`CONFIG_PIGEON_FOTA_RESUME` default n). Versioning rule: **0.13.4 is
+the resume-OTA era** — enabling resume (and anything else) goes in
+0.13.4, never patched into a shipped 0.13.3. Every shipped artifact is
+archived per the rule in [Creating a Release](#creating-a-release).
+
 ### Offline-resilience guarantees (task #4 — audit + fixes, 2026-08-01)
 
 The sign's day job (Swiftly fetch → display) no longer shares a thread,
@@ -532,6 +543,40 @@ Setup: in `app/boards/circuitdojo_feather_nrf9160_ns.conf` uncomment
 9. Push `update_stop_interval: 5` via shadow and confirm fetches still
    succeed with no RRC-setup churn (RAI floor holds), then restore 30.
 
+#### Measured results (first run of this checklist, 2026-08-10)
+
+From the app image's console on the bench cell:
+
+1. LTE-M only: registered home (`+CEREG: 1`, mode 7) ~3s after cfun=1;
+   first-fetch timing unregressed.
+2. PSM granted exactly as requested: `TAU: 43200 sec, active time: 0 sec`.
+3. PSM entry real: `%XMODEMSLEEP` within ~10ms of each RRC release —
+   the modem sleeps ~20s of every 30s fetch cycle.
+4. eDRX granted as asked (2621.43s, PTW 2.55) — recorded; not
+   load-bearing since PSM was granted.
+5. This mfw rejects `AT%RAI=2` and runs the `=1` fallback, so `%RAI`
+   notifications don't exist on this board; cell support was proven by
+   timing instead (next item).
+6. **AS-RAI is carrier-inert on this cell**: the `CONFIG_LTE_RAI_REQ=n`
+   A/B (same cell/hour) shows identical post-data→RRC-idle tails both
+   ways — 6–10s (RAI-on mean ~8.5s, baseline ~7.8s). The baseline IS
+   this carrier's inactivity timer: **6–10s**, so the 15s
+   `RAI_MIN_FETCH_INTERVAL_S` floor already sits above it — no retune.
+   The knob stays on: inert here, effective wherever the network
+   honors it.
+7. Session resumption active: steady-state fetch (connect→full
+   response) ~1.0–1.6s vs ~4s+ for the boot's first; zero
+   `Unable to set TLS session cache`.
+8. Regression sweep: 30s cadence + 300s pigeon cycle clean across
+   multi-hour soaks; a mid-soak shadow tweak (`update_stop_interval:
+   29`) applied and acked on the next poll, cadence followed. (FOTA
+   re-run deferred — the mechanism was verified end-to-end in the
+   0.13.2 campaign and this branch doesn't touch it.)
+9. Floor test at `update_stop_interval: 5`: fetches every ~5s ride the
+   warm connection (5s < the carrier's 6–10s timer) with zero CSCON
+   churn — RAI correctly unasserted below the floor; no PSM entry
+   while warm, by design. Restored to 30 after.
+
 ### Proposed next: RAI inside the `pigeon` library (not implemented here)
 
 The board's own client covers the 30s day job; the 300s pigeon burst
@@ -563,3 +608,21 @@ call):
 ## Creating a Release
 Update the [VERSION file](https://github.com/umts/embedded-departure-board/blob/main/app/VERSION).
 On a successful push to the main branch the [release workflow](https://github.com/umts/embedded-departure-board/blob/main/.github/workflows/release.yml) will; create a new release, generate release notes, and upload the freshly built hex/bin files to the release.
+
+### Archiving shipped artifacts (hard rule)
+
+One artifact per version string, ever — and the artifact is only
+decodable with the dictionary from its exact build, so they ship as a
+set. For every image that reaches a real device slot (prod OR staging
+catalog), copy into `releases/<version>/` (gitignored, survives build-dir
+churn):
+
+- `zephyr.signed.bin` (the OTA/upload artifact)
+- `zephyr.signed.hex` + `merged.hex` (programmer flash)
+- `log_dictionary.json` (from the same build dir — regenerated every
+  build, valid only for that image; without it the device's dictionary
+  logs are permanently undecodable, which already happened to the
+  catalog-0.13.2 dictionary)
+- `app.config` (the build's `.config`, for provenance; contains no
+  secrets beyond the endpoint/token already baked in the binary — the
+  directory is gitignored either way)

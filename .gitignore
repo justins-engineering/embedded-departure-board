@@ -38,3 +38,6 @@ app/prj.local.conf
 
 # Cortex debugging states
 .vscode/.cortex-debug.registers.state.json
+
+# Shipped-artifact archive (see README: Archiving shipped artifacts)
+releases/
