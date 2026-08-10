@@ -415,6 +415,151 @@ Post-OTA soak: ~31h, 1513 telemetry reports at unbroken cadence.
    `LOG_DEFAULT_LEVEL=3` needs the log-thread stack raised to 2048 in
    the same change if ever wanted.
 
+## LTE power configuration (task #10)
+
+Everything the sign sends is **mobile-originated**: Swiftly fetch every
+30s (shadow-tunable 5–45s), pigeon shadow/telemetry burst every 300s,
+dictionary-log batch ≤5min, NTP rarely, FOTA as a rare sustained ~45min
+chunked download. Nothing ever pages this device — no WS connector on
+this board, no server push. The board is mains-powered, so the point is
+carrier signaling/airtime, modem duty-cycle/heat, and a config that
+generalizes to PidgeIoT's battery products, not battery life here.
+
+What ships (both profiles, `app/boards/*.conf` + `net/custom_http_client.c`):
+
+| Knob | Was | Now | Why |
+|---|---|---|---|
+| System mode | LTE-M + NB-IoT + GPS (Kconfig default — nothing ever chose it) | **LTE-M only** | No GNSS user in this app; US NB-IoT effectively sunset and the wrong shape for 30s multi-KB HTTPS; smaller reacquisition scan space |
+| PSM | requested, TAU 12h / T3324 10s | requested, TAU 12h / **T3324 0s** | MO-only ⇒ a post-release paging window protects nothing; T3324=0 drops straight to PSM floor between fetches |
+| eDRX | off | requested, **2621.44s** (longest WB-S1 cycle) | Fallback for PSM-denying carriers only; with PSM+T3324=0 granted there are no idle paging occasions left for eDRX to stretch |
+| AS-RAI | off | **on** (`AT%RAI=2`→`=1` at modem init) + `SO_RAI(RAI_LAST)` after each completed Swiftly fetch | Deletes the carrier's ~10–20s RRC connected-mode inactivity tail — the dominant airtime cost at a 30s cadence |
+| TLS session resumption | dead code (guarded by the wrong Kconfig symbol) | **active** | Was `#ifdef CONFIG_MBEDTLS_SSL_CACHE_C` — mbedTLS's *server-side* cache, set nowhere — so every fetch paid a full handshake. The sockopt actually drives Zephyr's client cache in `sockets_tls.c`, compiled in all along |
+
+Expected effect at the default 30s cadence, when the network grants what
+we ask (~2,880 fetches/day):
+
+- **RAI**: per fetch, ~2–3s of real transfer then release in <1s instead
+  of a ~10–20s idle tail — connected-mode duty drops from roughly
+  40–75% to ~10%. Signaling is unchanged (one service request per fetch
+  either way; the release the network was going to do anyway just
+  happens sooner). This is the top win.
+- **Session resumption**: no certificate chain + one fewer round trip
+  per handshake — order of 3–5KB less down-link per fetch, ~9–14MB/day
+  of pure TLS overhead gone. Top data-cost win.
+- **PSM T3324=0**: the ~25s between fetches sits at PSM floor (~µA)
+  instead of idle-DRX paging. Duty/heat win; the big battery-product
+  lever.
+- LTE-M-only and eDRX only matter at the margins here (reacquisition
+  speed; PSM-denied carriers) but are the right defaults to copy to the
+  asset tracker.
+
+Guard rails, because the verified behaviors must not regress:
+
+- RAI is **skipped while `pigeon_client_fota_active()`** — a FOTA
+  download's per-chunk connections (one TLS connection per 512B chunk,
+  ~0.6–2.9s apart) need the link held; an RRC release between chunks
+  would add a service request per chunk. The 45-min download runs on
+  exactly the pre-task-#10 radio behavior.
+- RAI is **skipped below a 15s fetch interval**
+  (`RAI_MIN_FETCH_INTERVAL_S`, `custom_http_client.c`): under the
+  carrier's own inactivity timer the connection stays warm across
+  fetches for free, and forcing a release would *add* ~17k RRC setups a
+  day at the 5s shadow floor. If the bench pins this carrier's timer
+  (below), tune the floor to sit just above it.
+- `RAI_LAST`, not `RAI_NO_DATA`, and only after a complete response: the
+  socket still owes the wire its TLS close_notify, and `RAI_LAST`
+  sequences the release *after* that final uplink instead of racing it.
+  Where the cell has no AS-RAI, or on error/retry/redirect paths, the
+  hint is simply never asserted and behavior is exactly pre-task-#10.
+- PSM/eDRX/RAI are all *requests*; a denying network leaves the sign on
+  today's exact behavior. Nothing here can make connectivity worse than
+  the verified baseline — the failure mode of every knob is "no change".
+
+RAM, measured per-commit on both profiles (the whole stack built clean
+at every one of the five commits): the session-resumption fix, LTE-M-
+only, and T3324=0 are exactly 0B; the lte_lc eDRX and RAI modules cost
++128B of static RAM each (AT-monitor/work statics). Net app RAM:
+**debug 129768→130024B (99.01→99.20%), release 129768→129896B
+(99.01→99.10%)** (in release the eDRX module's share measured 0B —
+alignment/log-statics absorbed it); flash +~4.2KB. If the task-#7 RAM
+diet needs those bytes back, drop the eDRX module first — it is the
+pure-fallback knob.
+
+### Bench verification (console holder's checklist)
+
+Grants are per-attach and carrier-discretion — none of this can be
+proven without the modem on a real cell. All checks are console-log
+based on the **app image** (an at_client image attaches with its own
+requests and tells you nothing about ours).
+
+Setup: in `app/boards/circuitdojo_feather_nrf9160_ns.conf` uncomment
+`CONFIG_LTE_LINK_CONTROL_LOG_LEVEL_DBG=y`, and add (temporarily)
+`CONFIG_LTE_LC_MODEM_SLEEP_MODULE=y` +
+`CONFIG_LTE_LC_MODEM_SLEEP_NOTIFICATIONS=y`. Build debug, flash, watch:
+
+1. **System mode**: boot must register on LTE-M as before (`+CEREG: 5`
+   roaming / `1` home in the registration flow). Regression gate: time
+   to first successful Swiftly fetch is not worse than baseline.
+2. **PSM grant**: after registration, `lte_lc` logs
+   `TAU: <s> sec, active time: <s> sec` (psm.c). Granted-as-asked is
+   `TAU: 43200 sec, active time: 0 sec`; `active time: -1` means PSM
+   denied (then eDRX below is what matters). Record what the carrier
+   actually granted.
+3. **PSM entry**: `%XMODEMSLEEP notification` (xmodemsleep.c) appearing
+   between fetches = the modem really is sleeping, not just released.
+4. **eDRX grant**: `+CEDRXP notification` then
+   `eDRX value for LTE-M: <cycle>, PTW: <ptw>` (edrx.c). Only
+   load-bearing if PSM was denied.
+5. **AS-RAI support on this cell**: `%RAI notification` (rai.c) after
+   registration. If it never arrives, the cell predates Rel-14 AS-RAI
+   and check 6 will show the baseline tail — that is a finding, not a
+   failure.
+6. **RAI effect (the real proof)**: timestamp delta from
+   `Total bytes received:` (custom_http_client) to the next
+   `+CSCON notification` (cscon.c, RRC → idle). Expect **<2s** with
+   AS-RAI honored vs **~10–20s** baseline. For the baseline number,
+   build once with `CONFIG_LTE_RAI_REQ=n` on the same cell/hour — that
+   measured tail is also this carrier's inactivity timer: retune
+   `RAI_MIN_FETCH_INTERVAL_S` to sit just above it.
+7. **Session resumption**: fetch #2 onward, `Connecting to` →
+   `Sent NNN bytes` delta visibly shrinks (resumed ≈ sub-second vs
+   ~1.5–3s full handshake), and `Unable to set TLS session cache` must
+   never appear.
+8. **Regression sweep**: ≥1h at 30s cadence clean; one pigeon 300s
+   cycle applying a shadow tweak; then a full FOTA cycle on the test
+   pigeon — download completes, pacing comparable to the 0.13.2
+   campaign (~2.9s/chunk worst case), zero mid-download resets.
+9. Push `update_stop_interval: 5` via shadow and confirm fetches still
+   succeed with no RRC-setup churn (RAI floor holds), then restore 30.
+
+### Proposed next: RAI inside the `pigeon` library (not implemented here)
+
+The board's own client covers the 30s day job; the 300s pigeon burst
+(2–3 back-to-back connections: shadow GET, telemetry POST, sometimes
+shadow-report/logs POST) still pays one full inactivity tail per burst —
+~10–20s connected per 300s, an order of magnitude smaller than the
+Swiftly win but the same shape. Sketch for the pigeon repo (its owner's
+call):
+
+- `CONFIG_PIGEON_RAI`, default n, `depends on NRF_MODEM_LIB` (`SO_RAI`
+  is NCS-specific; vendor-neutral core untouched).
+- In `pigeon_https.c`: `RAI_ONGOING` right after each
+  `pigeon_https_connect()` (tells the modem more requests follow, so
+  mid-burst closes don't release), and an app-visible
+  `pigeon_rai_last_request()` one-shot that arms `RAI_LAST` before the
+  *next* request's `zsock_close()` — the app's cycle
+  (`pigeon_client_cycle()`) is the only place that knows which request
+  is the burst's last, and the socket it must be signaled on is gone by
+  the time the cycle returns.
+- Modem-TLS wrinkle to A/B on bench: pigeon's sockets are offloaded TLS,
+  where close_notify is generated *inside* the modem by `close()` — so
+  unlike the board's native-TLS socket it is plausible `RAI_NO_DATA`
+  just before `close()` is handled coherently there (the modem accounts
+  for its own teardown). Compare both by CSCON timing before picking.
+- FOTA path: worth `RAI_ONGOING` on chunk sockets for self-description,
+  and `RAI_LAST` on the final chunk only; the inter-chunk cadence
+  already keeps RRC up regardless.
+
 ## Creating a Release
 Update the [VERSION file](https://github.com/umts/embedded-departure-board/blob/main/app/VERSION).
 On a successful push to the main branch the [release workflow](https://github.com/umts/embedded-departure-board/blob/main/.github/workflows/release.yml) will; create a new release, generate release notes, and upload the freshly built hex/bin files to the release.

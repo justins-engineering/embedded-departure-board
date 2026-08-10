@@ -99,6 +99,10 @@ bool pigeon_client_fota_active(void) {
  * on the pigeon thread only. */
 static int applied_update_stop_interval_s = CONFIG_UPDATE_STOP_FREQUENCY_SECONDS;
 
+int pigeon_client_update_stop_interval_s(void) {
+  return applied_update_stop_interval_s;
+}
+
 /* Hard bounds on shadow-supplied update_stop_interval: the loop that runs
  * update_stop() is also the loop that feeds the 60s hardware watchdog
  * (CONFIG_MAX_TIME_INACTIVE_BEFORE_RESET_MS -- a wdt_install_timeout()
