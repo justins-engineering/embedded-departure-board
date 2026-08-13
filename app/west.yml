@@ -26,7 +26,9 @@ manifest:
     # Multiplexer Driver
     - name: multiplexer
       url: https://github.com/justins-engineering/zephyr-multiplexer
-      revision: main
+      # Explicit SHA rather than a branch name, for the same reason as pigeon
+      # below: a branch resolves to whatever it has become since the build.
+      revision: 09a535cecfa8ef3726e026ac58a431aedfc9427c
       path: multiplexer
 
     # Pigeon: PidgeIoT device client library (device shadow / telemetry /
@@ -37,9 +39,16 @@ manifest:
     # machine/CI runner without depending on a local out-of-tree checkout
     # existing. zephyr/module.yml wires it in automatically once fetched;
     # no ZEPHYR_EXTRA_MODULES/CMakeLists changes needed.
+    #
+    # Pinned to an explicit commit, never a branch. A shipped image must be
+    # rebuildable from this manifest alone; `revision: main` instead resolves
+    # to whatever the library has become since, so the artifact that was
+    # tested and the artifact a rebuild produces can silently differ with no
+    # change to this repo at all. Advancing this pin is a deliberate,
+    # separately-tested change, not a side effect of fetching.
     - name: pigeon
       url: https://github.com/justins-engineering/pigeon
-      revision: main
+      revision: ea1937afc44b25dafe090653b09bc683b4b977ec
       path: pigeon
 
   self:
