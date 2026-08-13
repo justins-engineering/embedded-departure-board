@@ -48,7 +48,7 @@ manifest:
     # separately-tested change, not a side effect of fetching.
     - name: pigeon
       url: https://github.com/justins-engineering/pigeon
-      revision: ea1937afc44b25dafe090653b09bc683b4b977ec
+      revision: 55390360df4e9c040169d9bdb7202d6d3571fe98
       path: pigeon
 
   self:
