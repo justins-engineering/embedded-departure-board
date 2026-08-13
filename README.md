@@ -157,6 +157,64 @@ rework, none of which compiles here — this app selects
 `CONFIG_PIGEON_CONNECTOR_HTTPS` and sets neither the CoAP nor the WS
 symbol.
 
+#### What 0.13.4 has NOT demonstrated yet
+
+Two open questions ride this release. Neither is settled by a clean boot,
+and both are easy to declare closed by accident.
+
+**The `sec_tag 2: -2` ENOENT — the soak bar, with the arithmetic done.**
+The pre-0.13.4 baseline on this rig is **5 occurrences in ~301 polls over
+25.1 h = 1.66% per poll** (uptimes 03:55, 05:05, 10:35, 16:20, 19:35;
+each a lone `shadow_get` failure that recovered on the next cycle). The
+mutex is a hypothesis about why they happen, not a proven fix. Since a
+poll is 300 s, a run of `n` consecutive clean polls puts the chance that
+the old rate still holds at `(1 - 0.0166)^n`:
+
+| clean polls | elapsed | confidence the old rate is gone |
+| ----------- | ------- | ------------------------------- |
+| 41          | 3.4 h   | 50% — worthless                 |
+| 138         | 11.5 h  | 90%                             |
+| 179         | 14.9 h  | 95%                             |
+| 275         | 22.9 h  | 99%                             |
+| **413**     | **34.4 h** | **99.9%**                    |
+
+**The bar for calling this resolved is ≥400 clean polls (~33 h).**
+Anything short of that is "consistent with resolved, not demonstrated" —
+say it that way. Note the shape of this curve: three hours of silence is
+a coin flip, so the intuition that "it's been quiet all evening, it's
+fixed" is precisely wrong, and is the reason the bar is written down here
+instead of being re-derived under pressure.
+
+**DNS behaviour after the resolver change.** The pin advance also
+switched `pigeon_https_connect()` from a hard-coded `AF_INET` hint to
+`AF_UNSPEC`, and made it try every address the resolver returns instead
+of only the first. This board has a documented modem DNS wedge in its
+history (`getaddrinfo` returning EAGAIN and dead-stretching for 14+ h
+until a modem restart), so the resolver is the one subsystem where a
+change deserves watching rather than assuming.
+
+What is settled statically: the family constants map correctly
+(`AF_UNSPEC`/`NRF_AF_UNSPEC` are both 0, and `nrf9x_sockets.c` assigns
+`ai_family` across without translating it, so the hint arrives intact),
+and Zephyr does not itself fan out into two queries — it hands the hint
+to the modem's closed-source `nrf_getaddrinfo`. Whether the modem then
+issues an AAAA query alongside the A query is therefore **not knowable
+from source** and has to be observed.
+
+What is worth knowing when reading the two halves of that change: they
+are a matched pair. The loop over every returned address is the defense
+against the risk `AF_UNSPEC` introduces — if a AAAA record does come back
+first and is unreachable, the old code ended the attempt there, and the
+new code closes that socket and tries the next candidate. Shipping only
+the `AF_UNSPEC` half would be strictly worse than shipping both.
+
+Baseline to compare against: the 0.13.3 window above logged **zero**
+`getaddrinfo`/resolve failures in 25.1 h. The detector is live at release
+log level (`pigeon_https_connect()` logs `Failed to resolve %s: %d` as
+`LOG_ERR`), so a failure would appear in the console capture rather than
+being swallowed. Any resolve failure in the first cycles after a 0.13.4
+flash is a stop-and-report, not a curiosity.
+
 ### Offline-resilience guarantees (task #4 — audit + fixes, 2026-08-01)
 
 The sign's day job (Swiftly fetch → display) no longer shares a thread,
