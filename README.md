@@ -139,6 +139,24 @@ the resume-OTA era** — enabling resume (and anything else) goes in
 0.13.4, never patched into a shipped 0.13.3. Every shipped artifact is
 archived per the rule in [Creating a Release](#creating-a-release).
 
+**0.13.4 (2026-08-13)** — a stability release, three fixes, no new
+features. The day job now reboots only after a run of consecutive failed
+`update_stop()` cycles (`CONFIG_UPDATE_FAILURES_BEFORE_RESET`), which is
+the fix for the production reboot a single Swiftly transient used to
+cause; HTTP retries back off instead of reissuing into the same bad
+instant; and the workspace `pigeon/` pin moves to `5539036`, whose HTTPS
+transport mutex closes a data race between the log-upload work item and
+the poller thread. That mutex also gives the modem one TLS handshake at
+a time, which is the leading (still unconfirmed) explanation for the
+chronic `sec_tag 2: -2` — confirming it needs a soak, not a boot test.
+FOTA download resume **stays off** (`CONFIG_PIGEON_FOTA_RESUME` default
+n): the "0.13.4 is the resume-OTA era" note above was a rule about never
+patching a shipped version, not a commitment to enable resume in this
+one. The pin advance also carries the library's CoAP connector and WS
+rework, none of which compiles here — this app selects
+`CONFIG_PIGEON_CONNECTOR_HTTPS` and sets neither the CoAP nor the WS
+symbol.
+
 ### Offline-resilience guarantees (task #4 — audit + fixes, 2026-08-01)
 
 The sign's day job (Swiftly fetch → display) no longer shares a thread,
