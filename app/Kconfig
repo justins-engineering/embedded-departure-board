@@ -51,6 +51,31 @@ config HTTP_REQUEST_RETRY_COUNT
     Boot-time default only: runtime-overridable from the pigeon shadow's
     "http_retry_count" key (src/runtime_config.h), clamped to 0-3.
 
+config HTTP_REQUEST_RETRY_BACKOFF_MS
+  int "Delay before the first HTTP request retry, in milliseconds"
+  default 1000
+  help
+    Wait between a failed request and the next attempt, doubling per retry
+    up to HTTP_REQUEST_RETRY_BACKOFF_MAX_MS. Zero restores the old
+    retry-immediately behaviour.
+
+    This exists because the upstream failures observed in production
+    arrive in clusters rather than as isolated events, so an instant retry
+    reissues the request inside the same upstream disturbance that just
+    rejected it and fails for the same reason. Spacing the attempts is
+    what makes the retry budget worth spending; raising the count alone
+    only buys more attempts inside the same bad moment.
+
+config HTTP_REQUEST_RETRY_BACKOFF_MAX_MS
+  int "Ceiling on the per-retry backoff delay, in milliseconds"
+  default 4000
+  help
+    Caps the doubling. The retry loop feeds the watchdog at the top of
+    every attempt, so the interval it must stay inside is one attempt plus
+    one backoff, not the sum of all of them -- but the cap keeps that
+    single interval far below MAX_TIME_INACTIVE_BEFORE_RESET_MS even if an
+    attempt itself runs long.
+
 config STOP_JSON_BUF_SIZE
   int "Defines the max size for stop JSON response body receive buffer"
   default 4096

@@ -470,8 +470,36 @@ clean_up:
     range_start = rc;
     goto retry;
   } else if ((rc == -3) && (retry_client_error < runtime_config_http_retry_count())) {
-    LOG_WRN("HTTP request GET %s%s failed, retrying...", hostname, path);
+    /* Wait before reissuing. The upstream failures this retries are
+     * observed to arrive in clusters, not as isolated events, so an
+     * immediate reattempt lands inside the same disturbance that just
+     * rejected the request and fails for the same reason -- spending the
+     * whole retry budget inside one bad moment. Doubling per attempt, up
+     * to a cap, spreads the attempts across it instead.
+     *
+     * Safe against the watchdog: the retry label feeds it before every
+     * attempt, so the interval that must stay under
+     * MAX_TIME_INACTIVE_BEFORE_RESET_MS is one attempt plus one backoff,
+     * not their sum over the whole budget. The cap bounds the added term
+     * to a small fraction of that window.
+     *
+     * Deliberately not applied to the range-continuation retry above: a
+     * partial transfer is progress, not a failure, and delaying it would
+     * only stretch a working download. */
+    unsigned int backoff_ms = (unsigned int)CONFIG_HTTP_REQUEST_RETRY_BACKOFF_MS
+                              << retry_client_error;
+
+    if (backoff_ms > (unsigned int)CONFIG_HTTP_REQUEST_RETRY_BACKOFF_MAX_MS) {
+      backoff_ms = (unsigned int)CONFIG_HTTP_REQUEST_RETRY_BACKOFF_MAX_MS;
+    }
+
+    LOG_WRN("HTTP request GET %s%s failed, retrying in %ums...", hostname, path, backoff_ms);
     retry_client_error++;
+
+    if (backoff_ms > 0) {
+      k_msleep((int32_t)backoff_ms);
+    }
+
     goto retry;
   } else if (rc < 0) {
     LOG_ERR("HTTP request GET %s%s failed", hostname, path);
