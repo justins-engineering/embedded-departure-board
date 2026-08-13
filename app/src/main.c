@@ -244,9 +244,21 @@ int main(void) {
          * fetches; rebooting here would kill the download and burn a
          * persisted attempt (it burned all three in the first live OTA
          * test). Skip this cycle -- the display keeps its last state and
-         * the harsh reset policy resumes the moment the download ends. */
+         * the reset policy resumes the moment the download ends. */
         LOG_WRN("update_stop failed during FOTA download; skipping reset policy this cycle");
+      } else if (
+          swiftly_consecutive_failures() < (unsigned int)CONFIG_UPDATE_FAILURES_BEFORE_RESET
+      ) {
+        /* Hold the last displayed times rather than resetting. See
+         * UPDATE_FAILURES_BEFORE_RESET for why a lone failure is not
+         * worth a reboot; the watchdog feed below still runs, so this
+         * cannot mask a wedged device. */
+        LOG_WRN(
+            "update_stop failed (%u consecutive); holding display, not resetting yet",
+            swiftly_consecutive_failures()
+        );
       } else {
+        LOG_ERR("update_stop failed %u times consecutively", swiftly_consecutive_failures());
         goto reset;
       }
 
@@ -260,7 +272,16 @@ int main(void) {
         if (pigeon_client_fota_active()) {
           /* See the CONFIG_LIGHT_SENSOR branch's comment. */
           LOG_WRN("update_stop failed during FOTA download; skipping reset policy this cycle");
+        } else if (
+            swiftly_consecutive_failures() < (unsigned int)CONFIG_UPDATE_FAILURES_BEFORE_RESET
+        ) {
+          /* See the CONFIG_LIGHT_SENSOR branch's comment. */
+          LOG_WRN(
+              "update_stop failed (%u consecutive); holding display, not resetting yet",
+              swiftly_consecutive_failures()
+          );
         } else {
+          LOG_ERR("update_stop failed %u times consecutively", swiftly_consecutive_failures());
           goto reset;
         }
       }

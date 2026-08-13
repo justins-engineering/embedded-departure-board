@@ -216,6 +216,21 @@ watchdog window — see `net/pigeon_client.c`), `ntp_timeout_ms` 500–30000,
 `ntp_retry_count` 1–5, `http_retry_count` 0–3. `reboot` is a one-shot
 command, never echoed in the ack. `firmware` drives FOTA (below).
 
+**Fetch-failure policy.** Two build-time knobs sit behind
+`http_retry_count`, both in `app/Kconfig`. Retries are spaced rather than
+immediate (`HTTP_REQUEST_RETRY_BACKOFF_MS`, doubling to
+`HTTP_REQUEST_RETRY_BACKOFF_MAX_MS`): the Swiftly empty-response
+transient arrives in clusters, and decoded production logs show the old
+code reissuing the request **2–11 ms** after the failure, well inside the
+same disturbance, so the extra attempts were spent where they could not
+succeed. The range-continuation retry is not delayed — a partial
+transfer is progress, not a failure. Separately, a reset now requires
+`UPDATE_FAILURES_BEFORE_RESET` consecutive failed cycles (default 3)
+instead of any single one; below the threshold the display holds its
+last state and `main`'s loop keeps feeding the watchdog, so a wedged
+device is still caught. The counter is `swiftly_consecutive_failures()`,
+already reported as telemetry.
+
 **Boot-apply (2026-08-09):** the first successful shadow fetch after boot
 applies `target_config` even when the shadow is CONVERGED —
 convergence is the platform's memory of what some past image acked,
@@ -389,10 +404,10 @@ Post-OTA soak: ~31h, 1513 telemetry reports at unbroken cadence.
   the persisted offset, invalidate on version change. Today every
   attempt restarts from byte 0 — the first failed 0.13.2 attempt threw
   away 351KB (72%) of already-paid-for LTE data.
-- **Soften the day-job reset policy generally**: the 31h soak logged 8
-  Swiftly-double-failure reboots (each recovering in ~15s). Recovery
-  works, but a bounded retry/backoff before rebooting would cut the
-  churn; product call.
+- ~~**Soften the day-job reset policy generally**~~ — landed, see
+  "Fetch-failure policy" above. The 31h soak's 8 Swiftly-double-failure
+  reboots (each recovering in ~15s) are what motivated it; the fix is
+  both halves, a failure-streak gate and spacing between retries.
 
 #### Remaining open items (ranked)
 

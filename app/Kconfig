@@ -36,6 +36,20 @@ config MAX_TIME_INACTIVE_BEFORE_RESET_MS
   int "Maximum amount of time the system can remain inactive before it resets in milliseconds"
   default 60000
 
+config UPDATE_FAILURES_BEFORE_RESET
+  int "Consecutive failed update cycles that trigger a reset"
+  default 3
+  help
+    Reset once this many update cycles have failed back to back. 1
+    restores the old behaviour of resetting on any single failure.
+
+    A reset costs a full LTE reattach, so it is only worth doing for a
+    fault that persists -- a lone upstream hiccup resolves long before
+    the reboot finishes, and rebooting for one has the sign dark for
+    longer than the failure itself would have. Below the threshold the
+    display simply holds its last state, and the loop keeps feeding the
+    watchdog, so a genuinely wedged device is still caught.
+
 #### LIGHT_SENSOR SETTINGS ####
 
 config LIGHT_SENSOR
