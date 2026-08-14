@@ -233,14 +233,12 @@ previously does **not** apply: that threshold was for proving *absence*,
 which needs a long clean run. Presence needs one event. Do not wait out a
 window whose result can no longer change the answer.
 
-The rate is unchanged as far as anyone can tell. Two events in 113 polls
-is 1.77%/poll against the 0.13.3 baseline of 2.10%; an unchanged rate
-predicts 2.37 and produced 2, so `P(<=2)` = 0.58 — no evidence of change
-in either direction. The 95% interval on the new rate is 0.21% to 6.39%,
-so it still bounds nothing useful about magnitude, and **two points are
-not a trend**. The gap between them is 21 polls where an independent
-process at this rate averages 56; `P(gap <= 21)` = 0.31, which is
-ordinary. Do not read periodicity into it.
+The rate is unchanged as far as anyone can tell. Three events in 125
+polls is 2.40%/poll against the 0.13.3 baseline of 2.10% — now slightly
+*above* it, having been below it at the previous two counts. An unchanged
+rate predicts 2.62 and produced 3. That wandering either side of the
+baseline as the sample grows is what a stable rate looks like; none of
+the three readings is a trend.
 
 Server-side confirmation, since the console alone cannot show it: the
 device stayed healthy throughout. 92 report cycles between 02:10:04Z and
@@ -286,28 +284,51 @@ Checked against telemetry history, which needs no device contact:
 | build | sec_tag events | on a cycle missing `rsrp_dbm` | degraded cycles |
 | ----- | -------------- | ----------------------------- | --------------- |
 | 0.13.3 | 8 | 8 | 49 of 385 |
-| 0.13.4 | 2 | 2 | 2 of 113 |
+| 0.13.4 | 3 | 3 | 3 of 125 |
 
-Ten for ten. Not an artefact of `rsrp_dbm` being flaky in general: on
+Eleven for eleven. Not an artefact of `rsrp_dbm` being flaky in general: on
 0.13.3 it is missing from 49 of 385 cycles, a 12.7% base rate, so
-eight-for-eight by chance is `P = 4e-8` (hypergeometric); 0.13.4's two
-land on its only two degraded cycles out of 113, `P = 1.6e-4`. Combined,
-`P = 6e-12`. Nor is it clustering — those 49
+eight-for-eight by chance is `P = 4e-8` (hypergeometric); 0.13.4's three
+land on its only three degraded cycles out of 125, `P = 3.1e-6`. Combined,
+`P = 1e-13`. Nor is it clustering — those 49
 cycles form 40 separate runs, longest 3, and the eight event cycles sit
 in runs of length 1,1,2,3,1,1,1,1, so they are effectively independent
 draws. `read_rsrp_dbm()` is byte-identical between the two builds, so an
 absence means the same thing in both.
 
-**One observation to watch, explicitly not a result.** The two runs
-disagree about how often the modem degrades at all: 12.7% of cycles on
-0.13.3 versus 1.8% on 0.13.4, and where 0.13.3 turned only 8 of its 49
-degraded cycles into failures, 0.13.4 turned both of its two into
-failures. If that held it would matter, because it would mean the
-precondition became rarer while the failure rate did not move. It rests
-on **two** degraded cycles, whose 95% interval spans roughly 16% to 100%,
-and the two windows differ in length and in which hours they cover. So it
-is a thing to re-check when the sample grows, not a finding, and it is
-recorded here only so nobody presents it as one.
+**A conversion difference between the builds, which survives one control
+and is undercut by another.** The two runs disagree about what happens
+after the modem degrades:
+
+| | degraded cycles | of those, produced a sec_tag failure |
+| --- | --- | --- |
+| 0.13.3, whole run | 49 of 385 (12.7%) | 8 (16%) |
+| 0.13.4, whole run | 3 of 125 (2.4%) | 3 (100%) |
+
+Fisher exact on that 2x2 gives `p = 0.0075`. **Restricting 0.13.3 to the
+same hours 0.13.4 covers (02-12Z) does not explain it** — 0.13.3's
+hour-matched slice is 16 degraded cycles in 134, converting 2, so the
+comparison becomes 3/3 against 2/16 and `p = 0.0103`. Time of day is not
+the answer.
+
+**But a second confound is, or may be, and the hour match does not touch
+it: the two windows have very different signal *variance*.** Median RSRP
+is effectively identical (-88 dBm on 0.13.4, -87 to -88 on 0.13.3), yet
+the ranges are not: 0.13.3 spans **-102 to -85 dBm**, while 0.13.4 has so
+far seen only **-89 to -87**. A far calmer radio environment explains the
+5x drop in how often the modem degrades at all — and it means 0.13.4's
+three degraded cycles may simply be a *different and more severe
+population* than 0.13.3's forty-nine, rather than the same population
+converting more often. A conversion rate compared across two differently
+composed populations is not a like-for-like comparison, which is the same
+trap as reading 7-of-8 first-in-run without the 81.6% base rate.
+
+So: real enough to keep watching, not established. It rests on three
+degraded cycles, and a single degraded-but-survived cycle on 0.13.4 would
+collapse it outright. **The mechanism question is genuinely open** — a
+regression in the advanced pin is one candidate, and severity composition
+is another that requires nothing to have regressed at all. Nothing here
+distinguishes them.
 
 **The asymmetry is the useful part.** 49 degraded cycles produced only 9
 failures, so a modem that will not report signal — by either arm above —
