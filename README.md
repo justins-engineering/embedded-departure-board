@@ -233,14 +233,14 @@ previously does **not** apply: that threshold was for proving *absence*,
 which needs a long clean run. Presence needs one event. Do not wait out a
 window whose result can no longer change the answer.
 
-The rate is unchanged as far as anyone can tell. The 0.13.3 baseline was
-8 events in ~381 polls (2.10%/poll); 92 polls of 0.13.4 predicts 1.93
-events under an unchanged rate and produced 1, so `P(<=1)` = 0.43 —
-no evidence of any change in either direction. The quiet first 7.5 h was
-never evidence of a fix either: `P(0 by then)` was 0.145. From one event
-in 92 polls the 95% interval on the new rate spans roughly 0.03% to 6%,
-so the data bounds nothing useful about magnitude. **The only settled
-fact is that it is not zero.**
+The rate is unchanged as far as anyone can tell. Two events in 113 polls
+is 1.77%/poll against the 0.13.3 baseline of 2.10%; an unchanged rate
+predicts 2.37 and produced 2, so `P(<=2)` = 0.58 — no evidence of change
+in either direction. The 95% interval on the new rate is 0.21% to 6.39%,
+so it still bounds nothing useful about magnitude, and **two points are
+not a trend**. The gap between them is 21 polls where an independent
+process at this rate averages 56; `P(gap <= 21)` = 0.31, which is
+ordinary. Do not read periodicity into it.
 
 Server-side confirmation, since the console alone cannot show it: the
 device stayed healthy throughout. 92 report cycles between 02:10:04Z and
@@ -283,18 +283,31 @@ currently emit.
 
 Checked against telemetry history, which needs no device contact:
 
-| build | sec_tag events | on a cycle missing `rsrp_dbm` |
-| ----- | -------------- | ----------------------------- |
-| 0.13.3 | 8 | 8 |
-| 0.13.4 | 1 | 1 |
+| build | sec_tag events | on a cycle missing `rsrp_dbm` | degraded cycles |
+| ----- | -------------- | ----------------------------- | --------------- |
+| 0.13.3 | 8 | 8 | 49 of 385 |
+| 0.13.4 | 2 | 2 | 2 of 113 |
 
-Not an artefact of `rsrp_dbm` being flaky in general: it is missing from
-49 of that run's 385 cycles, a 12.7% base rate, so eight-for-eight by
-chance is `P = 4e-8` (hypergeometric). Nor is it clustering — those 49
+Ten for ten. Not an artefact of `rsrp_dbm` being flaky in general: on
+0.13.3 it is missing from 49 of 385 cycles, a 12.7% base rate, so
+eight-for-eight by chance is `P = 4e-8` (hypergeometric); 0.13.4's two
+land on its only two degraded cycles out of 113, `P = 1.6e-4`. Combined,
+`P = 6e-12`. Nor is it clustering — those 49
 cycles form 40 separate runs, longest 3, and the eight event cycles sit
 in runs of length 1,1,2,3,1,1,1,1, so they are effectively independent
 draws. `read_rsrp_dbm()` is byte-identical between the two builds, so an
 absence means the same thing in both.
+
+**One observation to watch, explicitly not a result.** The two runs
+disagree about how often the modem degrades at all: 12.7% of cycles on
+0.13.3 versus 1.8% on 0.13.4, and where 0.13.3 turned only 8 of its 49
+degraded cycles into failures, 0.13.4 turned both of its two into
+failures. If that held it would matter, because it would mean the
+precondition became rarer while the failure rate did not move. It rests
+on **two** degraded cycles, whose 95% interval spans roughly 16% to 100%,
+and the two windows differ in length and in which hours they cover. So it
+is a thing to re-check when the sample grows, not a finding, and it is
+recorded here only so nobody presents it as one.
 
 **The asymmetry is the useful part.** 49 degraded cycles produced only 9
 failures, so a modem that will not report signal — by either arm above —
