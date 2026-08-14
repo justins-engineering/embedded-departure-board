@@ -261,11 +261,27 @@ re-provisioning on ENOENT: that needs `CFUN=4`, which tears down LTE to
 solve a problem the evidence says is not absence.
 
 Second: **every sec_tag failure on record landed on a cycle where the
-modem also failed to report signal strength.** `read_rsrp_dbm()` only
-sets `rsrp_dbm` when `AT+CESQ` parses and returns below 255 (3GPP's "not
-known or not detectable"), so a missing key means the modem declined a
-signal-quality query in that same 300 s cycle. Checked against telemetry
-history, which needs no device contact:
+modem also failed to report signal strength.**
+
+Be precise about what that absence does and does not say, because the
+telemetry collapses two different modem states into one missing key.
+`read_rsrp_dbm()` returns `INT32_MIN` — and so skips the key — under
+either arm of
+
+    if (ret != 1 || rsrp_raw > 97)
+
+`ret != 1` means the AT command did not execute or did not parse at all:
+the modem would not answer. `rsrp_raw > 97` means it answered perfectly
+well with a value outside 3GPP's valid 0-97 range, 255 being "not known
+or not detectable": the modem answered *I don't know*. Those are
+different conditions — something blocking modem access versus a radio
+state with nothing measurable — and they point at different root causes.
+History cannot tell them apart, so the finding below is stated as
+**`rsrp_dbm` absent**, never as "CESQ returned 255". Distinguishing them
+is the obvious next question and needs a log line the firmware does not
+currently emit.
+
+Checked against telemetry history, which needs no device contact:
 
 | build | sec_tag events | on a cycle missing `rsrp_dbm` |
 | ----- | -------------- | ----------------------------- |
@@ -281,11 +297,13 @@ draws. `read_rsrp_dbm()` is byte-identical between the two builds, so an
 absence means the same thing in both.
 
 **The asymmetry is the useful part.** 49 degraded cycles produced only 9
-failures, so a modem that cannot answer `AT+CESQ` is a *precondition*,
-not a trigger — necessary, nowhere near sufficient. Something else has to
-coincide. That reframes the question from "why does the credential
-vanish" (it doesn't) to "what else has to be true during a degraded cycle
-for `setsockopt` to be refused".
+failures, so a modem that will not report signal — by either arm above —
+is a *precondition*, not a trigger: necessary, nowhere near sufficient.
+Something else has to coincide. That reframes the question from "why does
+the credential vanish" (it doesn't) to "what else has to be true during a
+degraded cycle for `setsockopt` to be refused". And splitting the two
+arms may well answer it, if the failures turn out to sit on only one of
+them.
 
 This is still correlation: the honest reading is that both symptoms share
 an upstream cause in modem state, which is the hypothesis rather than the
