@@ -142,6 +142,16 @@ int update_stop(void) {
   }
 
   ret = parse_swiftly_json(&json_buf[0], &stop);
+  if (ret == PARSE_SWIFTLY_NO_DEPARTURES) {
+    /* A fetch that correctly reports nothing upcoming is a healthy fetch, so
+     * it clears the streak and refreshes the success timestamp exactly as a
+     * populated one does. Counting it as a failure would let a quiet stop
+     * accumulate a reset streak and would age swiftly_last_success_age_s
+     * without anything being wrong. */
+    failure_streak = 0;
+    last_success_uptime_ms = k_uptime_get();
+    return UPDATE_STOP_NO_DEPARTURES;
+  }
   if (ret) {
     failure_streak++;
     return 1;

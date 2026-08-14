@@ -26,6 +26,17 @@ typedef const struct DisplayBox {
 } DisplayBox;
 
 void update_stop_timeout_handler(struct k_timer* timer_id);
+
+/** @brief update_stop() fetched successfully but the stop has no departures.
+ *
+ * A separate result from 0 because callers light the display differently for
+ * an empty stop, and separate from the failure return because the fetch
+ * worked: it must not feed the reset streak or the fetch-health telemetry.
+ * Overnight, when empty is the correct answer for hours, treating it as a
+ * failure would be indistinguishable from the network being down.
+ */
+#define UPDATE_STOP_NO_DEPARTURES 2
+
 int update_stop(void);
 
 extern struct k_timer update_stop_timer;

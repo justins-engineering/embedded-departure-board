@@ -217,17 +217,14 @@ int main(void) {
     }
 
     if (k_sem_take(&update_stop_sem, K_NO_WAIT) == 0) {
-      /* A returned 2 corresponds to a successful response with no scheduled
-       * departures.
-       */
 #ifdef CONFIG_LIGHT_SENSOR
       ret = update_stop();
 
 #ifdef CONFIG_BOOTLOADER_MCUBOOT
-      /* First proven-working departure fetch (2 = success, empty stop):
-       * NOW a test-swapped image has earned permanent confirmation --
-       * see confirm_image_if_healthy()'s docs for the revert semantics. */
-      if ((ret == 0) || (ret == 2)) {
+      /* First proven-working departure fetch, empty stop included: NOW a
+       * test-swapped image has earned permanent confirmation -- see
+       * confirm_image_if_healthy()'s docs for the revert semantics. */
+      if ((ret == 0) || (ret == UPDATE_STOP_NO_DEPARTURES)) {
         confirm_image_if_healthy();
       }
 #endif  // CONFIG_BOOTLOADER_MCUBOOT
@@ -237,7 +234,7 @@ int main(void) {
         if (lux < 0) {
           goto reset;
         }
-      } else if (ret == 2) {
+      } else if (ret == UPDATE_STOP_NO_DEPARTURES) {
         lux = 0xFF;
       } else if (pigeon_client_fota_active()) {
         /* A FOTA download saturates the LTE link enough to fail Swiftly
@@ -268,7 +265,7 @@ int main(void) {
       }
 #else
       ret = update_stop();
-      if (ret && (ret != 2)) {
+      if (ret && (ret != UPDATE_STOP_NO_DEPARTURES)) {
         if (pigeon_client_fota_active()) {
           /* See the CONFIG_LIGHT_SENSOR branch's comment. */
           LOG_WRN("update_stop failed during FOTA download; skipping reset policy this cycle");

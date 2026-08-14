@@ -402,7 +402,7 @@ int parse_swiftly_json(const char* const json_ptr, Stop* stop) {
 
   if (ret < 2) {
     LOG_INF("No scheduled departures");
-    return 5;
+    return PARSE_SWIFTLY_NO_DEPARTURES;
   }
 
   /* Set the starting position for t */
