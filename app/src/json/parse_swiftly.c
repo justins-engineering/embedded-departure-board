@@ -289,10 +289,23 @@ static int parse_predictions_data(
         LOG_DBG(
             "        routeId: %.*s,", tokens[t].end - tokens[t].start, json_ptr + tokens[t].start
         );
-        memcpy(
-            predictions_data->route_id, json_ptr + tokens[t].start, tokens[t].end - tokens[t].start
-        );
-        predictions_data->route_id[(tokens[t].end - tokens[t].start)] = '\0';
+        /* Clamped because the length comes from the response, not from us: a
+         * route id longer than this field wrote past the end of it and into
+         * whatever the struct puts next. Nothing at the stop this board
+         * watches is long enough to trigger it, but the stop is a runtime
+         * setting, so the bound is one shadow edit away from mattering.
+         *
+         * Truncating rather than rejecting keeps it consistent with how the
+         * value is used: get_display_address() compares only the first four
+         * characters anyway, so a longer id was already being matched on its
+         * prefix. */
+        size_t route_id_len = (size_t)(tokens[t].end - tokens[t].start);
+
+        if (route_id_len >= sizeof(predictions_data->route_id)) {
+          route_id_len = sizeof(predictions_data->route_id) - 1;
+        }
+        memcpy(predictions_data->route_id, json_ptr + tokens[t].start, route_id_len);
+        predictions_data->route_id[route_id_len] = '\0';
       } else if (jsoneq(json_ptr, &tokens[t], "stopId")) {
         t++;
         LOG_DBG(
