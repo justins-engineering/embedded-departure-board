@@ -219,38 +219,65 @@ and do not re-upload on the strength of a stale read** — the catalog has
 no delete route, so a panicked retry under a *different* version label is
 how a duplicate row gets created.
 
-#### What 0.13.4 has NOT demonstrated yet
+#### 0.13.4 and the sec_tag ENOENT: SETTLED, and the answer is no
 
-Two open questions ride this release. Neither is settled by a clean boot,
-and both are easy to declare closed by accident.
+**The mutex did not fix it.** The error recurred on 0.13.4 at uptime
+07:35:07 (2026-08-14T09:44:57Z), 92 polls in:
 
-**The `sec_tag 2: -2` ENOENT — the soak bar, with the arithmetic done.**
-The pre-0.13.4 baseline is the complete 0.13.3 run on this rig — one
-continuous boot, 31.75 h, ~381 polls, **8 occurrences = 2.10% per poll**
-(uptimes 03:55, 05:05, 10:35, 16:20, 19:35, 26:00, 27:45, 30:10; each a
-lone `shadow_get` failure that recovered on the next cycle, every one
-landing on a poll boundary). The mutex is a hypothesis about why they
-happen, not a proven fix. Since a poll is 300 s, a run of `n` consecutive
-clean polls puts the chance that the old rate still holds at `(1 - p)^n`:
+    <err> pigeon: Failed to set TLS sec_tag 2: -2
+    <err> pigeon: Failed to connect to api.pidgeiot.com on every resolved address: 2
+    <err> pigeon_client: pigeon_shadow_get failed: -2
 
-| clean polls | elapsed | at 2.10% (measured) | at 1.66% (conservative) |
-| ----------- | ------- | ------------------- | ----------------------- |
-| ~35         | ~2.9 h  | 50% — worthless     | 45%                     |
-| 141         | 11.8 h  | 95%                 | 90%                     |
-| 326         | 27.1 h  | 99.9%               | 99.6%                   |
-| **400**     | **33.3 h** | **99.98%**       | **99.88%**              |
+One occurrence settles this, and the >=400-poll bar recorded here
+previously does **not** apply: that threshold was for proving *absence*,
+which needs a long clean run. Presence needs one event. Do not wait out a
+window whose result can no longer change the answer.
 
-The second column exists because a rate estimated from 8 events has real
-uncertainty; 1.66% is what the first 25.1 h alone suggested. **The bar
-holds either way: ≥400 clean polls (~33 h) clears 99.9% under both**, so
-it does not depend on which estimate is right.
+The rate is unchanged as far as anyone can tell. The 0.13.3 baseline was
+8 events in ~381 polls (2.10%/poll); 92 polls of 0.13.4 predicts 1.93
+events under an unchanged rate and produced 1, so `P(<=1)` = 0.43 —
+no evidence of any change in either direction. The quiet first 7.5 h was
+never evidence of a fix either: `P(0 by then)` was 0.145. From one event
+in 92 polls the 95% interval on the new rate spans roughly 0.03% to 6%,
+so the data bounds nothing useful about magnitude. **The only settled
+fact is that it is not zero.**
 
-**The bar for calling this resolved is ≥400 clean polls (~33 h).**
-Anything short of that is "consistent with resolved, not demonstrated" —
-say it that way. Note the shape of this curve: about three hours of
-silence is a coin flip, so the intuition that "it's been quiet all
-evening, it's fixed" is precisely wrong, and is the reason the bar is
-written down here instead of being re-derived under pressure.
+Server-side confirmation, since the console alone cannot show it: the
+device stayed healthy throughout. 92 report cycles between 02:10:04Z and
+09:44:58Z, median gap 300 s, maximum 306 s, **zero missed cycles**,
+`uptime_s` strictly monotonic 13 -> 27307 across all 92. The failure cost
+one `shadow_get`, nothing else.
+
+**Two things in that cycle point at the modem rather than the credential
+store, and both are worth checking against the next occurrence.**
+
+First, the telemetry POST in the *same* cycle succeeded — it is the
+09:44:58Z report carrying `uptime_s` 27307, i.e. exactly the uptime the
+console stamps on the failure. That POST uses the identical
+`setsockopt(sec_tag)` path. A credential that is genuinely absent cannot
+serve one request and fail the other seconds apart, so this is the modem
+declining a request, not a missing certificate. Do **not** "fix" this by
+re-provisioning on ENOENT: that needs `CFUN=4`, which tears down LTE to
+solve a problem the evidence says is not absence.
+
+Second, and new: that cycle is the **only one of the 92** that reported
+three telemetry keys instead of four. The missing one is `rsrp_dbm`,
+which `read_rsrp_dbm()` only sets when `AT+CESQ` returns a parseable
+value below 255 (255 being 3GPP's "not known or not detectable"). So two
+*independent* modem interactions degraded in the same cycle — a TLS
+credential lookup and a signal-quality query — while the data path
+carrying the POST kept working. That is the signature of transient modem
+state, not of anything in the credential store or the transport lock.
+It is a correlation of one, so treat it as the hypothesis to test rather
+than a conclusion: **does `rsrp_dbm` go missing on every future sec_tag
+cycle?** Server-side history answers that without touching the board.
+
+The `Failed to connect ... on every resolved address` line is new with
+the advanced pigeon pin and should not be mistaken for the DNS wedge:
+it means resolution *succeeded* and every returned address was then
+tried, each failing because the sec_tag could not be set.
+
+#### What 0.13.4 has still NOT demonstrated
 
 **DNS behaviour after the resolver change.** The pin advance also
 switched `pigeon_https_connect()` from a hard-coded `AF_INET` hint to
@@ -279,8 +306,21 @@ Baseline to compare against: the 0.13.3 window above logged **zero**
 `getaddrinfo`/resolve failures in 25.1 h. The detector is live at release
 log level (`pigeon_https_connect()` logs `Failed to resolve %s: %d` as
 `LOG_ERR`), so a failure would appear in the console capture rather than
-being swallowed. Any resolve failure in the first cycles after a 0.13.4
-flash is a stop-and-report, not a curiosity.
+being swallowed.
+
+**Status: still open, and unlike the sec_tag question this one genuinely
+needs its window.** 92 polls in, zero resolve failures — but that is an
+*absence* claim, so the arithmetic that stopped applying to sec_tag still
+applies here in full: silence is worth only as many cycles as sit behind
+it, and a wedge that historically took 14+ h to surface cannot be
+excluded by one overnight. Quote the cycle count with any claim made
+about it.
+
+One incidental point in its favour, from the sec_tag failure itself: the
+`Failed to connect to ... on every resolved address` line means
+`getaddrinfo` **returned addresses** and each was tried. Resolution
+worked in the one cycle where the modem was demonstrably degraded, which
+is the opposite of what a wedge looks like.
 
 ### Offline-resilience guarantees (task #4 — audit + fixes, 2026-08-01)
 
