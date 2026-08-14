@@ -157,6 +157,24 @@ rework, none of which compiles here — this app selects
 `CONFIG_PIGEON_CONNECTOR_HTTPS` and sets neither the CoAP nor the WS
 symbol.
 
+**0.13.5 (2026-08-14)** — a diagnostic build, one behavioural change from
+0.13.4: `read_rsrp_dbm()` now logs which of its two failure arms fired, so
+a missing signal reading records whether the modem refused the AT command
+or answered without a measurement. Nothing else differs.
+
+**It gets its own version even though it is one log line**, and the
+reason is the archive rule rather than ceremony. Flashing it under 0.13.4
+would put bytes on the board that differ from the archived and catalogued
+0.13.4 (`c1272500…`) while `CONFIG_PIGEON_FOTA_CURRENT_VERSION` still
+reported 0.13.4 — one version string naming two artifacts, which is
+exactly the 0.13.2 failure. The concrete cost is immediate rather than
+theoretical: a new build's `log_dictionary.json` shares almost no string
+addresses with the old one (measured at the 0.13.3→0.13.4 boundary: 2308
+of 2348 differ), so the dictionary currently uploaded to the pigeon would
+decode this firmware's logs into plausible-looking garbage. **Re-upload
+the dictionary after flashing**, or the log viewer lies rather than
+fails.
+
 #### 0.13.4 cutover results (flashed 2026-08-14T02:09:50Z)
 
 RAM did not move: **117864 B / 128 KB = 89.92%**, byte-identical to
