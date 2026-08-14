@@ -260,17 +260,38 @@ declining a request, not a missing certificate. Do **not** "fix" this by
 re-provisioning on ENOENT: that needs `CFUN=4`, which tears down LTE to
 solve a problem the evidence says is not absence.
 
-Second, and new: that cycle is the **only one of the 92** that reported
-three telemetry keys instead of four. The missing one is `rsrp_dbm`,
-which `read_rsrp_dbm()` only sets when `AT+CESQ` returns a parseable
-value below 255 (255 being 3GPP's "not known or not detectable"). So two
-*independent* modem interactions degraded in the same cycle — a TLS
-credential lookup and a signal-quality query — while the data path
-carrying the POST kept working. That is the signature of transient modem
-state, not of anything in the credential store or the transport lock.
-It is a correlation of one, so treat it as the hypothesis to test rather
-than a conclusion: **does `rsrp_dbm` go missing on every future sec_tag
-cycle?** Server-side history answers that without touching the board.
+Second: **every sec_tag failure on record landed on a cycle where the
+modem also failed to report signal strength.** `read_rsrp_dbm()` only
+sets `rsrp_dbm` when `AT+CESQ` parses and returns below 255 (3GPP's "not
+known or not detectable"), so a missing key means the modem declined a
+signal-quality query in that same 300 s cycle. Checked against telemetry
+history, which needs no device contact:
+
+| build | sec_tag events | on a cycle missing `rsrp_dbm` |
+| ----- | -------------- | ----------------------------- |
+| 0.13.3 | 8 | 8 |
+| 0.13.4 | 1 | 1 |
+
+Not an artefact of `rsrp_dbm` being flaky in general: it is missing from
+49 of that run's 385 cycles, a 12.7% base rate, so eight-for-eight by
+chance is `P = 4e-8` (hypergeometric). Nor is it clustering — those 49
+cycles form 40 separate runs, longest 3, and the eight event cycles sit
+in runs of length 1,1,2,3,1,1,1,1, so they are effectively independent
+draws. `read_rsrp_dbm()` is byte-identical between the two builds, so an
+absence means the same thing in both.
+
+**The asymmetry is the useful part.** 49 degraded cycles produced only 9
+failures, so a modem that cannot answer `AT+CESQ` is a *precondition*,
+not a trigger — necessary, nowhere near sufficient. Something else has to
+coincide. That reframes the question from "why does the credential
+vanish" (it doesn't) to "what else has to be true during a degraded cycle
+for `setsockopt` to be refused".
+
+This is still correlation: the honest reading is that both symptoms share
+an upstream cause in modem state, which is the hypothesis rather than the
+conclusion. But it is a measured precondition with a base rate, not a
+hunch, and it costs nothing to extend — every future occurrence can be
+checked the same way from history alone.
 
 The `Failed to connect ... on every resolved address` line is new with
 the advanced pigeon pin and should not be mistaken for the DNS wedge:
