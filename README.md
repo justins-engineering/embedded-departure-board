@@ -339,17 +339,42 @@ time, "and reports the violation as a spurious sec_tag not found on an
 otherwise valid tag". **The architectural defect is real and worth fixing
 on its own merits.**
 
-**It is not, however, what causes these failures.** Contention requires
-the two handshakes to overlap, and they do not:
+**Whether it causes these failures is OPEN, and an earlier entry here
+claiming otherwise was wrong.** That claim rested on an unstated
+assumption — that Swiftly's timer fires on the 30 s boundary, so that a
+poll landing 7.4 s later would find the fetch long finished. The console
+refutes it. Swiftly's own failures are logged at 8.8-14 s mod 30, so its
+fetches *start* near 7-8 s mod 30, and the two clients are essentially
+co-phased:
 
-- A Swiftly fetch takes 1.0-1.6 s with session resumption and about 4 s
-  cold. The pigeon poll begins **7.4 s** after the Swiftly tick, so a
-  normal fetch has been finished for several seconds before pigeon starts.
-- Overlap would need a Swiftly fetch running >7 s, which happens only when
-  it fails and retries — and those do not coincide. Across all 11
-  failures the nearest Swiftly retry is 294 s to 1493 s away in ten cases;
-  the single close one is +2.6 s *after* the sec_tag error, so it followed
-  the failure rather than preceding it.
+| | pigeon `setsockopt` | earliest Swiftly failure logged | separation |
+| --- | --- | --- | --- |
+| 0.13.3 | 8.34 s mod 30 | 9.78 s | +1.43 s |
+| 0.13.4 | 7.40 s mod 30 | 8.83 s | +1.43 s |
+
+Spread within each build is 0.04 s, and the separation is **identical to
+the centisecond across two builds at different absolute offsets**. Since a
+Swiftly fetch takes roughly that long to reach a header-parse failure, the
+two handshakes appear to begin within a few hundred milliseconds of each
+other. The schedules do not keep them apart; they hold them together.
+
+That does not establish contention either. The co-phasing applies to
+*every* poll, and only about 2% fail — so alignment is again necessary
+rather than sufficient, with sub-second jitter deciding whether the
+critical sections actually collide. And the console cannot settle it: a
+**successful** Swiftly fetch logs nothing at release level, so the
+aggressor is invisible exactly when it wins. Only one of the eleven
+failures has a logged Swiftly failure within 30 s, and that absence is
+uninformative rather than exculpatory.
+
+**The cheap decisive experiment is to break the phase.**
+`update_stop_interval` is a runtime shadow setting. Moving it off 30 s —
+29 or 31 — makes the two schedules drift against each other instead of
+staying locked, so a contention-driven failure rate should change
+markedly while a modem-state one should not. It needs no firmware and no
+reboot, so it costs no observation window. It is a write to a production
+sign's configuration and therefore the owner's call, not one to make
+casually.
 
 **One trap worth naming, because it looks like a smoking gun.** Every
 failure lands at a fixed offset after a Swiftly tick — 8.3 s on 0.13.3,
