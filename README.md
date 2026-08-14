@@ -323,6 +323,41 @@ converting more often. A conversion rate compared across two differently
 composed populations is not a like-for-like comparison, which is the same
 trap as reading 7-of-8 first-in-run without the 81.6% base rate.
 
+**A within-build test removes the confound, and it comes back negative
+for severity.** The cross-build comparison can be sidestepped entirely by
+staying inside 0.13.3: it has 49 degraded cycles, 8 of which converted.
+A degraded cycle carries no reading by definition, but its neighbours do,
+so the readings either side serve as a severity proxy — same firmware,
+same window, same environment, n=49 instead of 3.
+
+| worst neighbouring RSRP | n | median | mean |
+| --- | --- | --- | --- |
+| degraded, converted | 8 | -88.0 dBm | -89.00 |
+| degraded, survived | 39 | -88.0 dBm | -89.59 |
+
+Difference +0.59 dB, permutation `p = 0.65` — and the sign is *backwards*:
+the cycles that failed sat in marginally better conditions. Averaging both
+neighbours instead of taking the worse one gives +0.24 dB, `p = 0.81`.
+More pointedly, **the four deepest excursions in the whole degraded set
+(-102, -95, -94, -93 dBm) all belong to cycles that did not fail.**
+
+Limits, because the proxy is weak in ways that matter. Neighbours bracket
+the degraded cycle rather than measuring it, and a momentary fade between
+two five-minute samples is invisible to them; 14 of the 49 had only one
+usable neighbour and 2 had none, those last being episodes of three or
+more consecutive cycles. RSRP is also only one axis of "severe" — a modem
+mid-reattach or mid-reselection can show perfectly ordinary signal either
+side. And with 8 converted cycles the test has limited power: the 95%
+interval on the difference is -1.29 to +2.47 dB, so it rules out the
+converted cycles being more than about 1.3 dB worse, and nothing finer.
+
+What that leaves: severity, as far as signal strength can express it, does
+**not** predict conversion within a single build. The explanation that
+0.13.4's three degraded cycles all failed merely because they were worse
+loses its main support. That does not establish the alternative — it means
+the cross-build gap now wants a mechanism, and a mechanism that exists
+only in the newer build is back to being worth examining.
+
 So: real enough to keep watching, not established. It rests on three
 degraded cycles, and a single degraded-but-survived cycle on 0.13.4 would
 collapse it outright. **The mechanism question is genuinely open** — a
