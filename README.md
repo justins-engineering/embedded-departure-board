@@ -157,33 +157,79 @@ rework, none of which compiles here — this app selects
 `CONFIG_PIGEON_CONNECTOR_HTTPS` and sets neither the CoAP nor the WS
 symbol.
 
+#### 0.13.4 cutover results (flashed 2026-08-14T02:09:50Z)
+
+RAM did not move: **117864 B / 128 KB = 89.92%**, byte-identical to
+0.13.3. The whole `.config` delta against the shipped 0.13.3 is seven
+lines — the two backoff knobs, the streak threshold, and two version
+strings — so the library's Kconfig rewrite shifted no default here.
+
+Three independent proofs the board runs this exact image, since one alone
+is easy to fool yourself with:
+
+1. The TF-M banner it printed at boot, `Built Thu 13 Aug 2026 19:29:26
+   UTC`, is present inside `releases/0.13.4/merged.hex` at offset 105197.
+   (An ANSI escape sits between `Built ` and the date, so a naive
+   `strings | grep 'Built.*2026'` finds nothing — search for the date
+   alone.)
+2. `uptime_s` dropped from 91212 to 13.
+3. It logged `retrying in 1000ms`, a string only 0.13.4 can emit.
+
+That third one is also the proof the retry backoff *runs*, not merely
+that it compiled: 0.13.3 logs `failed, retrying...` and reissued in
+2-11 ms; this build logs `failed, retrying in %ums...` and printed the
+configured first step. It hit the chronic Swiftly transient at uptime
+00:05:13, absorbed it, kept `swiftly_consecutive_failures` at 0, and did
+not reboot.
+
+End to end over three poll cycles (uptime 13 / 311 / 611 s, exactly the
+300 s cadence): LTE attached at -88 dBm, shadow fetched and converged
+2/2 with `current_config == target_config` about 12 s after boot,
+telemetry on cadence, history rows landing in Postgres.
+
+**Verifying a catalog upload: Hyperdrive caches reads for ~60 s.** The
+firmware `POST` returned a real row (id from `INSERT ... RETURNING`), yet
+`GET /flocks/:id/firmware` kept showing only the old row for the next
+minute — because the pre-upload `GET` had just seeded Hyperdrive's
+default query cache, and the identical `SELECT` was served from it. The
+row was in Postgres the whole time (`uploaded_at` proves it landed
+immediately). **Wait out the cache before concluding an upload failed,
+and do not re-upload on the strength of a stale read** — the catalog has
+no delete route, so a panicked retry under a *different* version label is
+how a duplicate row gets created.
+
 #### What 0.13.4 has NOT demonstrated yet
 
 Two open questions ride this release. Neither is settled by a clean boot,
 and both are easy to declare closed by accident.
 
 **The `sec_tag 2: -2` ENOENT — the soak bar, with the arithmetic done.**
-The pre-0.13.4 baseline on this rig is **5 occurrences in ~301 polls over
-25.1 h = 1.66% per poll** (uptimes 03:55, 05:05, 10:35, 16:20, 19:35;
-each a lone `shadow_get` failure that recovered on the next cycle). The
-mutex is a hypothesis about why they happen, not a proven fix. Since a
-poll is 300 s, a run of `n` consecutive clean polls puts the chance that
-the old rate still holds at `(1 - 0.0166)^n`:
+The pre-0.13.4 baseline is the complete 0.13.3 run on this rig — one
+continuous boot, 31.75 h, ~381 polls, **8 occurrences = 2.10% per poll**
+(uptimes 03:55, 05:05, 10:35, 16:20, 19:35, 26:00, 27:45, 30:10; each a
+lone `shadow_get` failure that recovered on the next cycle, every one
+landing on a poll boundary). The mutex is a hypothesis about why they
+happen, not a proven fix. Since a poll is 300 s, a run of `n` consecutive
+clean polls puts the chance that the old rate still holds at `(1 - p)^n`:
 
-| clean polls | elapsed | confidence the old rate is gone |
-| ----------- | ------- | ------------------------------- |
-| 41          | 3.4 h   | 50% — worthless                 |
-| 138         | 11.5 h  | 90%                             |
-| 179         | 14.9 h  | 95%                             |
-| 275         | 22.9 h  | 99%                             |
-| **413**     | **34.4 h** | **99.9%**                    |
+| clean polls | elapsed | at 2.10% (measured) | at 1.66% (conservative) |
+| ----------- | ------- | ------------------- | ----------------------- |
+| ~35         | ~2.9 h  | 50% — worthless     | 45%                     |
+| 141         | 11.8 h  | 95%                 | 90%                     |
+| 326         | 27.1 h  | 99.9%               | 99.6%                   |
+| **400**     | **33.3 h** | **99.98%**       | **99.88%**              |
+
+The second column exists because a rate estimated from 8 events has real
+uncertainty; 1.66% is what the first 25.1 h alone suggested. **The bar
+holds either way: ≥400 clean polls (~33 h) clears 99.9% under both**, so
+it does not depend on which estimate is right.
 
 **The bar for calling this resolved is ≥400 clean polls (~33 h).**
 Anything short of that is "consistent with resolved, not demonstrated" —
-say it that way. Note the shape of this curve: three hours of silence is
-a coin flip, so the intuition that "it's been quiet all evening, it's
-fixed" is precisely wrong, and is the reason the bar is written down here
-instead of being re-derived under pressure.
+say it that way. Note the shape of this curve: about three hours of
+silence is a coin flip, so the intuition that "it's been quiet all
+evening, it's fixed" is precisely wrong, and is the reason the bar is
+written down here instead of being re-derived under pressure.
 
 **DNS behaviour after the resolver change.** The pin advance also
 switched `pigeon_https_connect()` from a hard-coded `AF_INET` hint to
