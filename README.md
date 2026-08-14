@@ -305,6 +305,34 @@ degraded cycle for `setsockopt` to be refused". And splitting the two
 arms may well answer it, if the failures turn out to sit on only one of
 them.
 
+**Three further cuts of the same data, all negative — recorded so they
+are not re-run.** None of them separates "the transition *into* a
+degraded state triggers it" from "it is a property of the degraded
+state".
+
+*Position within a degraded run.* Seven of the eight 0.13.3 events sit on
+the first degraded cycle of their run; one sits on the third of three.
+That looks suggestive and is not: degraded cycles come overwhelmingly
+alone (33 of the 40 runs are a single cycle), so **81.6% of degraded
+cycles are first-in-run to begin with**. Under a null of "failures land
+anywhere in a degraded run", P(>=7 of 8 first) = 0.55. The observation is
+exactly what chance predicts, so this data cannot answer the question —
+and the lone position-3-of-3 event is a direct counterexample to the pure
+transition story.
+
+*Time of day.* Nothing. The nine events fall in nine distinct UTC hours
+spread across the whole clock (00, 04, 09, 10, 13, 20, 21, 22, 23), and
+the 49 degraded cycles themselves are spread over 21 of the 24 hours.
+Ruled out rather than left as a maybe.
+
+*Event-bearing runs versus the rest.* No difference in the one dimension
+available: event-bearing runs are 75% single-cycle (6 of 8), the other 32
+are 84% (27 of 32).
+
+The existing data is therefore exhausted for this question. Separating
+the two arms of the `read_rsrp_dbm()` guard is the next real step, and it
+needs a firmware log line that does not exist yet.
+
 This is still correlation: the honest reading is that both symptoms share
 an upstream cause in modem state, which is the hypothesis rather than the
 conclusion. But it is a measured precondition with a base rate, not a
