@@ -323,6 +323,38 @@ converting more often. A conversion rate compared across two differently
 composed populations is not a like-for-like comparison, which is the same
 trap as reading 7-of-8 first-in-run without the 81.6% base rate.
 
+**Reading the pin advance directly, which is free and sharper than any
+statistic here.** The board moved from pigeon `ea1937a` to `5539036`. On
+the path from `socket()` through `setsockopt(TLS_SEC_TAG_LIST)` to
+`connect()`, exactly three things changed:
+
+1. the resolver hint went from `AF_INET` to `AF_UNSPEC`;
+2. a single connect attempt became a loop over every resolved address,
+   so `setsockopt(sec_tag)` is now called once *per address*;
+3. the whole connect runs under a mutex that did not previously exist —
+   `5539036` is itself the commit that added it.
+
+**The console eliminates the first two.** Each failure logs exactly one
+`Failed to set TLS sec_tag` line followed by one `on every resolved
+address`, so the resolver is returning a single address and the loop
+executes once. With one candidate the new code does precisely what the
+old code did, and the `AF_UNSPEC` hint is not producing extra records.
+That leaves the mutex as the only behavioural change on the failing path.
+
+**But the timing argues against the mutex too.** Every failure lands at a
+fixed offset into the 300 s poll cycle: `uptime mod 300` is **8 s on all
+eight 0.13.3 events and 7 s on all three 0.13.4 events**, with zero spread
+in either build. A shadow fetch queued behind another transport operation
+would start late and by a variable amount, since the holder's duration
+varies; instead the failing operation starts at the same instant every
+time, and on the newer build it starts a second *earlier* rather than
+later. That is not the signature of lock contention.
+
+So the source reading narrows the mechanism to one candidate and the
+timing then undercuts it. Neither explanation is in good health, which is
+worth stating plainly rather than leaving a hypothesis alive on the
+strength of an unexamined association.
+
 **A within-build test removes the confound, and it comes back negative
 for severity.** The cross-build comparison can be sidestepped entirely by
 staying inside 0.13.3: it has 49 degraded cycles, 8 of which converted.
