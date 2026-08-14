@@ -323,6 +323,42 @@ converting more often. A conversion rate compared across two differently
 composed populations is not a like-for-like comparison, which is the same
 trap as reading 7-of-8 first-in-run without the 81.6% base rate.
 
+**A second, real hazard found while chasing this — and falsified as its
+cause.** The board runs two independent TLS clients against one modem:
+pigeon's HTTPS path, and the app's own `custom_http_client.c`, whose
+`tls_setup()` issues its own `setsockopt(TLS_SEC_TAG_LIST)` for the
+Swiftly fetch. They run on different threads (the poller is created at
+`pigeon_client.c:755`; Swiftly runs off `update_stop_timer` on main) and
+share **no** lock — `pigeon_https_lock` serializes pigeon against pigeon
+and knows nothing about the app's client. Nothing else contends: NTP is
+UDP, and the remaining semaphores guard unrelated state.
+
+That is exactly the hazard `pigeon_https.c`'s own comment describes — the
+modem permits several concurrent TLS *sessions* but one handshake at a
+time, "and reports the violation as a spurious sec_tag not found on an
+otherwise valid tag". **The architectural defect is real and worth fixing
+on its own merits.**
+
+**It is not, however, what causes these failures.** Contention requires
+the two handshakes to overlap, and they do not:
+
+- A Swiftly fetch takes 1.0-1.6 s with session resumption and about 4 s
+  cold. The pigeon poll begins **7.4 s** after the Swiftly tick, so a
+  normal fetch has been finished for several seconds before pigeon starts.
+- Overlap would need a Swiftly fetch running >7 s, which happens only when
+  it fails and retries — and those do not coincide. Across all 11
+  failures the nearest Swiftly retry is 294 s to 1493 s away in ten cases;
+  the single close one is +2.6 s *after* the sec_tag error, so it followed
+  the failure rather than preceding it.
+
+**One trap worth naming, because it looks like a smoking gun.** Every
+failure lands at a fixed offset after a Swiftly tick — 8.3 s on 0.13.3,
+7.4 s on 0.13.4, with no spread. That is not evidence: the poll cycle is
+300 s and the Swiftly cycle 30 s, and 300 is a multiple of 30, so *every*
+poll lands at the same offset after a tick whether it fails or not. The
+constant is a property of the two cadences, not of the failures. Same
+shape as reading a first-in-run count without its base rate.
+
 **Reading the pin advance directly, which is free and sharper than any
 statistic here.** The board moved from pigeon `ea1937a` to `5539036`. On
 the path from `socket()` through `setsockopt(TLS_SEC_TAG_LIST)` to
