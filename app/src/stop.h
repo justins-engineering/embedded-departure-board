@@ -17,6 +17,12 @@ typedef struct Destination {
 
 typedef struct PredictionsData {
   char route_id[5];
+  /* The name printed on the bus, stored beside the internal id because a
+   * display mapping may legitimately be written with either. The two are
+   * usually the same string and occasionally are not -- this agency's G1
+   * carries the id G101 -- and only the id was kept, so a mapping authored
+   * with the short name matched nothing and left that display dark. */
+  char route_short_name[5];
   unsigned int destinations_size;
   Destination destinations[CONFIG_ROUTE_MAX_DEPARTURES];
 } PredictionsData;

@@ -30,12 +30,28 @@ static DisplayBox* box_params_for_position(const DisplayBox display_boxes[], uin
   return NULL;
 }
 
+/* A mapping entry matches on either spelling of the route. The id is what
+ * the feed calls it internally; the short name is what is printed on the
+ * bus and on the timetable, and is therefore what someone authoring a
+ * mapping will reach for. They agree for most routes and not for all --
+ * this agency's G1 is served under the id G101 -- so accepting only the id
+ * meant a plausibly-written mapping matched nothing at all, silently.
+ *
+ * Accepting both makes an ambiguity reachable that the id alone did not
+ * have: one route's short name could equal a different route's id, and the
+ * first entry in the map would win. That is not hypothetical in general
+ * transit data, only absent from this stop, so anyone extending this should
+ * check for it rather than assume. Direction still has to agree either way,
+ * which narrows it further. */
 static DisplayBox* get_display_address(
     const DisplayBox display_boxes[], const struct display_map_entry map[], size_t map_count,
-    const char* route_id, const char direction_code
+    const char* route_id, const char* route_short_name, const char direction_code
 ) {
   for (size_t i = 0; i < map_count; i++) {
-    if (!strncmp(route_id, map[i].route, 4) && (map[i].direction == direction_code)) {
+    if (map[i].direction != direction_code) {
+      continue;
+    }
+    if (!strncmp(route_id, map[i].route, 4) || !strncmp(route_short_name, map[i].route, 4)) {
       return box_params_for_position(display_boxes, map[i].position);
     }
   }
@@ -78,7 +94,8 @@ static int update_routes(
       }
 
       DisplayBox* display = get_display_address(
-          display_boxes, map, map_count, prediction_data.route_id, destination.direction_id
+          display_boxes, map, map_count, prediction_data.route_id,
+          prediction_data.route_short_name, destination.direction_id
       );
       if (display != NULL) {
         LOG_INF(

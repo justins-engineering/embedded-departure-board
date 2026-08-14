@@ -279,6 +279,16 @@ static int parse_predictions_data(
             "        routeShortName: %.*s,", tokens[t].end - tokens[t].start,
             json_ptr + tokens[t].start
         );
+        /* Clamped for the same reason as the id below: the length is the
+         * response's, not ours. Short names run longer than ids at plenty of
+         * agencies, so this bound is the more likely of the two to be hit. */
+        size_t short_name_len = (size_t)(tokens[t].end - tokens[t].start);
+
+        if (short_name_len >= sizeof(predictions_data->route_short_name)) {
+          short_name_len = sizeof(predictions_data->route_short_name) - 1;
+        }
+        memcpy(predictions_data->route_short_name, json_ptr + tokens[t].start, short_name_len);
+        predictions_data->route_short_name[short_name_len] = '\0';
       } else if (jsoneq(json_ptr, &tokens[t], "routeName")) {
         t++;
         LOG_DBG(
