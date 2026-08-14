@@ -21,17 +21,25 @@ app/keys/private/*
 # Cache
 .cache/
 
-# West deps
-mbedtls/
-nrf/
-nrfxlib/
-pcf85063a/
-tools/
-modules/
-bootloader/
-zephyr/
-multiplexer/
-pigeon/
+# West deps -- top-level directories `west update` creates. Anchored with a
+# leading slash because these are ordinary names: unanchored, `zephyr/` also
+# matches a directory of that name at any depth, and it silently swallowed
+# the first-party stub headers under tests/parse_swiftly/zephyr/.
+#
+# mbedtls, pcf85063a and tools are leftovers from an older manifest that
+# fetched them at the root; the current one puts mbedtls under modules/ and
+# fetches neither of the others. Kept anchored rather than deleted so a
+# manifest that brings them back is still covered.
+/mbedtls/
+/nrf/
+/nrfxlib/
+/pcf85063a/
+/tools/
+/modules/
+/bootloader/
+/zephyr/
+/multiplexer/
+/pigeon/
 
 # Real device secrets (CONFIG_PIGEON_ENDPOINT/CONFIG_PIGEON_TOKEN, etc.)
 app/prj.local.conf
@@ -44,9 +52,3 @@ releases/
 
 # Host test build output
 tests/parse_swiftly/.build/
-
-# The west-dependency ignores above are unanchored, so `zephyr/` matches a
-# directory of that name at ANY depth -- including the stub headers the host
-# parser tests need. Those stubs are first-party source, not a fetched
-# dependency, and without them a fresh clone cannot build the tests at all.
-!tests/parse_swiftly/zephyr/
