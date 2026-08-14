@@ -164,16 +164,37 @@ RAM did not move: **117864 B / 128 KB = 89.92%**, byte-identical to
 lines — the two backoff knobs, the streak threshold, and two version
 strings — so the library's Kconfig rewrite shifted no default here.
 
+Shipped artifact identity, recorded here because `releases/` is
+gitignored and these hashes are otherwise not in version control:
+
+| artifact | sha256 | bytes |
+| -------- | ------ | ----- |
+| `zephyr.signed.bin` (catalog + OTA) | `c1272500b83a3d5028de5c330951822bf2dbdc4781d60f461f6e46b0dec2adc2` | 489070 |
+| `log_dictionary.json` | `fe855f76ff54b7d0657c5b807c50e305ae4b9cf3f68dd3c8ebd068df0681270c` | 66151 |
+| `merged.hex` | `12aace599f3f3a8653f30eb0e7dc7743c62653096199021a159c681e3b534bf5` | 1500722 |
+
 Three independent proofs the board runs this exact image, since one alone
 is easy to fool yourself with:
 
 1. The TF-M banner it printed at boot, `Built Thu 13 Aug 2026 19:29:26
    UTC`, is present inside `releases/0.13.4/merged.hex` at offset 105197.
-   (An ANSI escape sits between `Built ` and the date, so a naive
-   `strings | grep 'Built.*2026'` finds nothing — search for the date
-   alone.)
 2. `uptime_s` dropped from 91212 to 13.
 3. It logged `retrying in 1000ms`, a string only 0.13.4 can emit.
+
+**Matching a device's boot banner to an image — the technique, because
+the obvious form of it silently fails.** The banner is stored with an
+ANSI colour escape between `Built ` and the date, so `strings hex |
+grep 'Built.*2026'` returns nothing and reads as "this image is not the
+one running". Convert and search for the date alone:
+
+```sh
+arm-zephyr-eabi-objcopy -I ihex -O binary releases/<ver>/merged.hex /tmp/m.bin
+python3 -c "print(open('/tmp/m.bin','rb').read().find(b'Thu 13 Aug 2026 19:29:26 UTC'))"
+```
+
+A non-negative offset is the match. Same trap class as `stat -c %y`
+printing local time while `date -u` prints UTC when correlating console
+timestamps — prefer `date -u -r <file>` for a file's mtime in UTC.
 
 That third one is also the proof the retry backoff *runs*, not merely
 that it compiled: 0.13.3 logs `failed, retrying...` and reissued in
