@@ -41,3 +41,12 @@ app/prj.local.conf
 
 # Shipped-artifact archive (see README: Archiving shipped artifacts)
 releases/
+
+# Host test build output
+tests/parse_swiftly/.build/
+
+# The west-dependency ignores above are unanchored, so `zephyr/` matches a
+# directory of that name at ANY depth -- including the stub headers the host
+# parser tests need. Those stubs are first-party source, not a fetched
+# dependency, and without them a fresh clone cannot build the tests at all.
+!tests/parse_swiftly/zephyr/
