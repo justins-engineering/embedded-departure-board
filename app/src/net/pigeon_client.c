@@ -577,7 +577,24 @@ static int32_t read_rsrp_dbm(void) {
   int rsrp_raw;
   int ret = nrf_modem_at_scanf("AT+CESQ", "+CESQ: %*d,%*d,%*d,%*d,%*d,%d", &rsrp_raw);
 
-  if (ret != 1 || rsrp_raw > 97) {
+  /* Split because the caller cannot tell these apart: both arms return the
+   * same sentinel, so the omitted telemetry key records that the reading was
+   * absent but not which of two quite different modem conditions produced
+   * it. A modem that will not answer at all, and one that answers that it
+   * has nothing measurable, point at different causes. This matters because
+   * every recorded "Failed to set TLS sec_tag" has landed on a cycle where
+   * one of these two happened, and which one is the open question.
+   *
+   * Logged on the failure paths only -- a healthy read stays silent -- and
+   * at warning level because release builds drop anything lower, which is
+   * how the last diagnostic of this kind stayed invisible for months. */
+  if (ret != 1) {
+    LOG_WRN("AT+CESQ did not return a reading (scanf ret %d)", ret);
+    return INT32_MIN;
+  }
+
+  if (rsrp_raw > 97) {
+    LOG_WRN("AT+CESQ reported no measurable signal (raw %d)", rsrp_raw);
     return INT32_MIN;
   }
 
