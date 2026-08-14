@@ -1,5 +1,6 @@
 #include "update_stop.h"
 
+#include <string.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
@@ -46,6 +47,19 @@ static int update_routes(
 ) {
   unsigned int times[6] = {0};
 
+  /* Summarised once at the end of the pass rather than logged per
+   * destination. A route that matches no display mapping does so on every
+   * destination of every pass, so the per-destination form buried the fact
+   * in thousands of identical lines a day -- which is why it was kept at a
+   * level release builds drop, and why the mismatch that dark-started a
+   * display went unseen through a production cutover. Only the first
+   * offender is kept, so this costs a fixed few bytes on a stack that is
+   * already the tight resource here; the count tells a reader whether
+   * there are others to find after fixing that one. */
+  unsigned int unmatched = 0;
+  char unmatched_route[sizeof(stop.predictions_data[0].route_id)] = {0};
+  char unmatched_direction = '\0';
+
   for (size_t box = 0; box < CONFIG_NUMBER_OF_DISPLAY_BOXES; box++) {
     (void)display_off(box);
   }
@@ -87,14 +101,34 @@ static int update_routes(
         }
 #endif
       } else {
-        LOG_INF(
-            "Display address for Route: %s, Direction Code: %c not found. Minutes to "
-            "departure: %d",
-            prediction_data.route_id, destination.direction_id, destination.min
-        );
+        if (unmatched == 0) {
+          /* Whole fixed-size array, NUL included: the parser always
+           * terminates route_id, and both are the same char[N], so this
+           * copies the terminator rather than relying on a bound that
+           * stops one byte short of it. */
+          memcpy(unmatched_route, prediction_data.route_id, sizeof(unmatched_route));
+          unmatched_direction = destination.direction_id;
+        }
+        unmatched++;
       }
     }
   }
+
+  /* A warning rather than info because it is always a real fault: this is
+   * only reached for a departure the API actually returned, so it means a
+   * bus is due and no display will show it. It also cannot chatter on a
+   * healthy sign -- a correct mapping never reaches here at all, and an
+   * empty stop skips this branch entirely -- so it stays silent until
+   * something is genuinely misconfigured, then keeps saying so until it is
+   * fixed. The route id printed is the one the API returns, which is what
+   * the shadow's mapping has to match. */
+  if (unmatched > 0) {
+    LOG_WRN(
+        "%u departure(s) had no display mapping; first was route %s direction %c",
+        unmatched, unmatched_route, unmatched_direction
+    );
+  }
+
   return 0;
 }
 
