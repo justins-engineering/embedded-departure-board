@@ -21,20 +21,18 @@ app/keys/private/*
 # Cache
 .cache/
 
-# West deps -- top-level directories `west update` creates. Anchored with a
-# leading slash because these are ordinary names: unanchored, `zephyr/` also
-# matches a directory of that name at any depth, and it silently swallowed
-# the first-party stub headers under tests/parse_swiftly/zephyr/.
+# West deps -- exactly the top-level directories `west update` creates, no
+# more. Anchored with a leading slash because these are ordinary names:
+# unanchored, `zephyr/` also matches a directory of that name at any depth,
+# and it silently swallowed the first-party stub headers under
+# tests/parse_swiftly/zephyr/.
 #
-# mbedtls, pcf85063a and tools are leftovers from an older manifest that
-# fetched them at the root; the current one puts mbedtls under modules/ and
-# fetches neither of the others. Kept anchored rather than deleted so a
-# manifest that brings them back is still covered.
-/mbedtls/
+# Add an entry only for a directory west actually fetches at the root
+# (`west list`). One that matches nothing costs nothing today, but the day
+# it does match it hides a first-party directory without saying so, whereas
+# an unignored dep shows up as untracked noise you can see and fix.
 /nrf/
 /nrfxlib/
-/pcf85063a/
-/tools/
 /modules/
 /bootloader/
 /zephyr/
