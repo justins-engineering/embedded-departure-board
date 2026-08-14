@@ -367,6 +367,34 @@ aggressor is invisible exactly when it wins. Only one of the eleven
 failures has a logged Swiftly failure within 30 s, and that absence is
 uninformative rather than exculpatory.
 
+**An RRC-release mechanism was proposed and does not survive this
+repo's own bench results.** The idea: each successful Swiftly fetch sets
+`SO_RAI`/`RAI_LAST`, sequencing an RRC release, and pigeon handshakes
+into that teardown. It fits the symptoms neatly. It is nonetheless dead,
+for a reason already measured and written down above under the LTE
+results: **AS-RAI is carrier-inert on this cell.** The
+`CONFIG_LTE_RAI_REQ=n` A/B on the same cell and hour showed identical
+post-data RRC-idle tails either way — 6-10 s, RAI-on mean ~8.5 s against
+a ~7.8 s baseline. The release is driven by the carrier's own inactivity
+timer, not by the RAI hint, so there is no RAI-triggered teardown at the
+end of a fetch to handshake into. The release also lands 6-10 s after the
+*last* traffic on the link from either client, which is after the poll
+completes rather than during it.
+
+What survives from that line is narrower and worth keeping: with a 30 s
+fetch cadence against a 6-10 s inactivity timer, the link goes idle
+between Swiftly fetches, so **every** fetch begins with an RRC setup —
+and pigeon's handshake is co-phased with that setup rather than with any
+release. That is a modem-busy state, but it is the contention story
+again, not a separate one.
+
+**The Swiftly success-versus-failure check is underpowered and settles
+nothing.** An RAI-linked mechanism would predict failures avoiding
+Swiftly-failure cycles, since the hint only fires on success. Swiftly
+fails on ~1.76% of fetches (90 of ~5100), so across 11 events chance
+predicts 0.19 coincidences and one was observed — `P(>=1)` = 0.18.
+No signal in either direction, and none reachable without far more events.
+
 **The cheap decisive experiment is to break the phase.**
 `update_stop_interval` is a runtime shadow setting. Moving it off 30 s —
 29 or 31 — makes the two schedules drift against each other instead of
