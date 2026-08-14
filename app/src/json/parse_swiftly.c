@@ -359,6 +359,13 @@ static int parse_data(
         LOG_DBG("    predictionsData: [");
         t = parse_predictions_data(json_ptr, t, tokens, tokens[t].size, stop);
       } else {
+        /* Nothing to parse, but the caller's Stop is reused across fetches
+         * and every other field is only ever written by the parse below.
+         * Without this the previous response's routes survive and the sign
+         * redraws departures the payload no longer contains -- most likely
+         * after a stop_id change to a stop that carries no routes, since
+         * that is the one way this arm gets reached in normal operation. */
+        stop->routes_size = 0;
         break;
       }
       LOG_DBG("    ]");
