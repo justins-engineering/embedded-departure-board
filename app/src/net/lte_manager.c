@@ -208,6 +208,79 @@ int lte_connect(void) {
   return 0;
 }
 
+#if CONFIG_DNS_FAILURES_BEFORE_MODEM_RESTART > 0
+/* Consecutive resolver failures on the Swiftly fetch path. Only ever
+ * touched from main, which is where that fetch runs, so it needs no
+ * synchronisation of its own. */
+static unsigned int resolve_failure_streak;
+
+/* The recovery the DNS wedge has never had. Deliberately CFUN=4 -> CFUN=1
+ * rather than the full lte_lc_connect() the boot path uses: this returns as
+ * soon as the modem accepts normal mode, leaving it to reattach on its own
+ * (measured at about 3s on this cell) instead of blocking main inside the
+ * watchdog window waiting for registration. The fetch that triggered this
+ * has already failed, and the next one is 30s away, so nothing is gained by
+ * waiting here.
+ *
+ * No attempt is made to hold pigeon's transport lock across it. By the time
+ * this runs the resolver has failed for every one of the last N cycles, and
+ * pigeon resolves the same way against the same modem, so there is no
+ * handshake in flight to protect -- only a lock that a wedged link could
+ * keep this recovery waiting on. */
+static void modem_restart(void) {
+  int err = wdt_feed(wdt, wdt_channel_id);
+
+  if (err) {
+    LOG_ERR("Failed to feed watchdog. Err: %d", err);
+  }
+
+  err = lte_lc_offline();
+  if (err) {
+    LOG_ERR("Failed to put the modem offline. Err: %d", err);
+  }
+
+  /* Attempted whether or not the step above reported success: the one
+   * outcome worse than a wedged resolver is a modem parked offline. */
+  err = lte_lc_normal();
+  if (err) {
+    LOG_ERR("Failed to return the modem to normal mode. Err: %d", err);
+  }
+
+  err = wdt_feed(wdt, wdt_channel_id);
+  if (err) {
+    LOG_ERR("Failed to feed watchdog. Err: %d", err);
+  }
+}
+#endif  // CONFIG_DNS_FAILURES_BEFORE_MODEM_RESTART > 0
+
+void lte_note_resolve_result(_Bool resolved) {
+#if CONFIG_DNS_FAILURES_BEFORE_MODEM_RESTART > 0
+  if (resolved) {
+    resolve_failure_streak = 0;
+    return;
+  }
+
+  resolve_failure_streak++;
+
+  if (resolve_failure_streak < (unsigned int)CONFIG_DNS_FAILURES_BEFORE_MODEM_RESTART) {
+    return;
+  }
+
+  LOG_WRN(
+      "Name resolution has failed %u times running; restarting the modem", resolve_failure_streak
+  );
+
+  /* Cleared before the restart, not after, so that a restart which does
+   * not help costs another full threshold before the next one. Otherwise a
+   * permanently broken resolver would restart the modem on every cycle
+   * from here on. */
+  resolve_failure_streak = 0;
+  modem_restart();
+#else
+  (void)resolved;
+#endif  // CONFIG_DNS_FAILURES_BEFORE_MODEM_RESTART > 0
+}
+
 int lte_disconnect(void) {
   int err;
 

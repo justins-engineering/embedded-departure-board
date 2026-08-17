@@ -356,8 +356,11 @@ retry:
   }
   if (err) {
     LOG_ERR("getaddrinfo() failed, %s", strerror(errno));
+    lte_note_resolve_result(false);
     return errno;
   }
+
+  lte_note_resolve_result(true);
 
   char peer_addr[INET6_ADDRSTRLEN];
 

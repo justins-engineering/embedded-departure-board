@@ -50,6 +50,47 @@ config UPDATE_FAILURES_BEFORE_RESET
     display simply holds its last state, and the loop keeps feeding the
     watchdog, so a genuinely wedged device is still caught.
 
+config DNS_FAILURES_BEFORE_MODEM_RESTART
+  int "Consecutive resolver failures that trigger a modem restart"
+  default 60
+  help
+    Restart the modem -- offline functional mode, then normal -- once
+    this many Swiftly fetches in a row have failed inside
+    getaddrinfo(). A resolved lookup clears the count. 0 disables the
+    recovery.
+
+    This exists for the modem DNS wedge in this board's history:
+    getaddrinfo() started returning EAGAIN and kept returning it for
+    14+ hours, and nothing short of restarting the modem cleared it.
+    The firmware never attempted one.
+
+    The default is deliberately generous. 60 failures is half an hour
+    at the 30s default cadence, and the wedge is a many-hour
+    phenomenon, so nothing transient should ever spend an LTE reattach
+    on this. Note that the threshold counts failures rather than
+    seconds: the fetch cadence is shadow-tunable down to 5s, which
+    would shrink the same count to five minutes.
+
+    Where this can fire is narrower than it looks, and worth
+    understanding before retuning it. A failed resolve fails the whole
+    update cycle, and UPDATE_FAILURES_BEFORE_RESET already reboots the
+    sign after three of those in a row -- a reboot that powers the
+    modem off and brings it back up, which is a superset of what this
+    does and arrives twenty times sooner. So in ordinary operation the
+    streak cannot exceed three and this never runs.
+
+    The window it is really for is a FOTA download, where that reset
+    policy is deliberately suppressed for as long as the transfer runs,
+    up to its 60-minute ceiling -- and a sustained transfer degrading
+    the link until DNS failed against every host is something this
+    hardware has actually done, during the first live OTA. In that
+    window this is the only self-recovery the device has, which is also
+    why the threshold sits well inside the ceiling rather than past it.
+
+    Only the Swiftly fetch feeds the count. NTP resolves rarely and
+    against a different host, so mixing it in would leave a streak
+    meaning nothing in particular.
+
 #### LIGHT_SENSOR SETTINGS ####
 
 config LIGHT_SENSOR

@@ -22,4 +22,17 @@ int lte_connect(void);
  * response body buffer.
  */
 int lte_disconnect(void);
+
+/** @fn void lte_note_resolve_result(_Bool resolved)
+ *  @brief Reports one name-resolution outcome to the DNS-wedge recovery.
+ *
+ *  Counts consecutive failures and, on reaching
+ *  CONFIG_DNS_FAILURES_BEFORE_MODEM_RESTART, restarts the modem before
+ *  returning -- so this is not always a cheap call, and belongs on a path
+ *  that has already failed rather than in a hot loop. A resolved lookup
+ *  clears the count. See that Kconfig symbol's help for why the threshold
+ *  is what it is, and for the narrow circumstances in which it can be
+ *  reached at all.
+ */
+void lte_note_resolve_result(_Bool resolved);
 #endif
