@@ -1,6 +1,7 @@
 /** @headerfile custom_http_client.h */
 #include "custom_http_client.h"
 
+#include <pigeon_internal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <zephyr/app_version.h>
@@ -32,6 +33,30 @@ LOG_MODULE_REGISTER(custom_http_client);
  * this carrier's timer, tune this to sit just above it. */
 #define RAI_MIN_FETCH_INTERVAL_S 15
 #endif  // CONFIG_LTE_RAI_REQ
+
+/* How long a fetch waits for pigeon's cross-transport TLS lock before
+ * abandoning the attempt.
+ *
+ * The modem permits several concurrent TLS sessions but only one handshake
+ * in flight, and reports a violation as a spurious "sec_tag not found" on a
+ * credential that is demonstrably present. pigeon serializes its own
+ * transports behind one mutex for that reason; this client is a second,
+ * independent TLS client against the same modem, and until it took the same
+ * lock nothing arbitrated between the two. Their schedules do not keep them
+ * apart either -- the poll cycle is a whole multiple of the fetch cadence,
+ * so every poll starts at the same fixed offset after a fetch tick, about a
+ * second and a half.
+ *
+ * Bounded rather than K_FOREVER because this runs on main, the thread that
+ * feeds the hardware watchdog. The bound is pigeon's own worst case: it
+ * holds the lock for an entire connect/request/close, whose ceiling is
+ * http_client_req()'s 10s timeout, so a wait this long is only lost to a
+ * pigeon transaction that is itself timing out -- and failing the cycle to
+ * hold the last departure times is the right answer by then. There is ample
+ * room against the 60s watchdog window: the retry label feeds before every
+ * attempt, so the interval that has to fit inside it is one wait plus one
+ * fetch, not the sum across the retry budget. */
+#define TRANSPORT_LOCK_TIMEOUT_MS 10000
 
 static const char swiftly_api_key[] = {
 #include "../keys/private/swiftly-api.key"
@@ -272,6 +297,7 @@ static int send_http_request(
   long range_start = 0;
   // Keep track of retry attempts so we don't get in a loop
   int retry_client_error = 0;
+  _Bool transport_locked = false;
 
   struct zsock_addrinfo* addr_inf;
   static struct zsock_addrinfo hints = {.ai_socktype = SOCK_STREAM, .ai_flags = AI_NUMERICSERV};
@@ -366,6 +392,19 @@ retry:
   }
 
   if (sec_tag != NO_SEC_TAG) {
+    /* Covers the sec_tag being set through the end of the handshake -- the
+     * span the modem serializes -- and not a byte further. Request and
+     * response ride an established session, which the modem is content to
+     * run alongside others, so holding it there would only stall pigeon's
+     * poller behind a whole Swiftly fetch. A plain-HTTP redirect never
+     * reaches here and needs no lock: there is no handshake to collide. */
+    if (pigeon_transport_lock(K_MSEC(TRANSPORT_LOCK_TIMEOUT_MS)) != 0) {
+      LOG_WRN("Transport busy after %dms; abandoning this attempt", TRANSPORT_LOCK_TIMEOUT_MS);
+      rc = -3;
+      goto clean_up;
+    }
+    transport_locked = true;
+
     err = tls_setup(sock, hostname, sec_tag);
     if (err) {
       goto clean_up;
@@ -377,6 +416,12 @@ retry:
   );
 
   err = zsock_connect(sock, addr_inf->ai_addr, addr_inf->ai_addrlen);
+
+  if (transport_locked) {
+    pigeon_transport_unlock();
+    transport_locked = false;
+  }
+
   if (err) {
     LOG_ERR("connect() failed. Err %d: %s", errno, strerror(errno));
     rc = -3;
@@ -452,6 +497,13 @@ retry:
 #endif  // CONFIG_LTE_RAI_REQ
 
 clean_up:
+  /* Only still held when tls_setup() failed between taking it and the
+   * connect that normally releases it. */
+  if (transport_locked) {
+    pigeon_transport_unlock();
+    transport_locked = false;
+  }
+
   LOG_DBG("Closing socket %d", sock);
   err = zsock_close(sock);
   if (err) {

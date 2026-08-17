@@ -64,6 +64,16 @@ if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/keys/private/swiftly-api.key)
 endif()
 
 target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+# pigeon's cross-transport TLS handshake lock is declared in the library's
+# own src/pigeon_internal.h, not in the <pigeon.h> it publishes. This app's
+# Swiftly client is a second TLS client on the same modem and has to take
+# that lock (see net/custom_http_client.c), so take the declaration from
+# where it lives instead of restating the prototype here: C links a
+# locally-declared prototype against a changed definition without
+# complaint, where an include fails the build.
+target_include_directories(app PRIVATE ${ZEPHYR_PIGEON_MODULE_DIR}/src)
+
 FILE(GLOB_RECURSE app_sources src/*.c)
 target_sources(app PRIVATE ${app_sources})
 
