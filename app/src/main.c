@@ -22,6 +22,11 @@
 
 LOG_MODULE_REGISTER(main);
 
+/* Reads without clearing. pigeon_init() reads the same register to report
+ * the boot's cause as telemetry and never clears it, on the principle that
+ * whichever of two readers runs second must still see the same value --
+ * and this one runs first. Clearing is main's job, once both have read;
+ * see the call site. */
 void log_reset_reason(void) {
   uint32_t cause;
   int err = hwinfo_get_reset_cause(&cause);
@@ -79,7 +84,6 @@ void log_reset_reason(void) {
     if (cause == RESET_TEMPERATURE) {
       LOG_WRN("RESET_TEMPERATURE");
     }
-    hwinfo_clear_reset_cause();
   }
 }
 
@@ -204,6 +208,15 @@ int main(void) {
    * unreachable PidgeIoT can neither delay this boot path nor starve the
    * watchdog this loop feeds. */
   pigeon_client_init();
+
+  /* Both readers of the reset-cause register have now run -- this boot's
+   * log line above, and pigeon_init() synchronously inside the call above
+   * -- so it is safe to clear, and it has to be cleared by someone: this
+   * SoC's RESETREAS is cumulative, a set bit surviving until written back.
+   * Left alone it becomes the OR of every reset the board has ever taken,
+   * which reports a fixed mask forever rather than this boot's cause, and
+   * stops matching log_reset_reason()'s equality tests at all. */
+  (void)hwinfo_clear_reset_cause();
 
   while (1) {
     if (k_sem_take(&rtc_sync_sem, K_NO_WAIT) == 0) {
