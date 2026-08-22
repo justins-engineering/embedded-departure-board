@@ -40,6 +40,26 @@ static const struct gpio_dt_spec display_switches[] = {
     GPIO_DT_SPEC_GET(DT_NODELABEL(display_switch_5), gpios)
 };
 
+/* Everything that sizes an array by box position, or validates one out of
+ * the shadow, trusts these two to be the same number. */
+BUILD_ASSERT(
+    ARRAY_SIZE(display_switches) == DISPLAY_BOX_CAPACITY,
+    "display_switch nodes and DISPLAY_BOX_CAPACITY describe different hardware"
+);
+
+/* Box positions reach here from the shadow's display mapping, so an index
+ * out of range is operator input rather than a firmware constant. It is
+ * still a caller bug by this point (the mapping is validated against the
+ * same capacity before it is ever stored), but unchecked it would drive a
+ * GPIO built from whatever follows the array. */
+static bool switch_in_range(const int display_number) {
+  if ((display_number < 0) || (display_number >= (int)ARRAY_SIZE(display_switches))) {
+    LOG_ERR("Display switch index %d out of range", display_number);
+    return false;
+  }
+  return true;
+}
+
 int init_display_switches(void) {
   for (size_t i = 0; i < ARRAY_SIZE(display_switches); i++) {
     if (!gpio_is_ready_dt(&display_switches[i])) {
@@ -63,6 +83,10 @@ int init_display_switches(void) {
 }
 
 int display_on(const int display_number) {
+  if (!switch_in_range(display_number)) {
+    return -EINVAL;
+  }
+
   int err = gpio_pin_set_dt(&display_switches[display_number], 1);
   if (err) {
     LOG_ERR("Setting GPIO pin level failed: %d", err);
@@ -72,6 +96,10 @@ int display_on(const int display_number) {
 }
 
 int display_off(const int display_number) {
+  if (!switch_in_range(display_number)) {
+    return -EINVAL;
+  }
+
   int err = gpio_pin_set_dt(&display_switches[display_number], 0);
   if (err) {
     LOG_ERR("Setting GPIO pin level failed: %d", err);
