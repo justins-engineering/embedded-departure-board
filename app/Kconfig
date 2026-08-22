@@ -8,6 +8,12 @@ config LED_DISPLAY_TEST
 #### STOP SETTINGS ####
 config STOP_ID
   string "Bus stop ID"
+  help
+    Boot seed for the runtime stop ID (src/stop_id.h) and nothing more:
+    update_stop's boot gate parks every fetch and display write until
+    the shadow's first target_config supplies the real stop, so this
+    value can no longer reach the network or the displays on a managed
+    sign. It survives for builds that run without a shadow.
 
 config STOP_MAX_ROUTES
   int "Maximum number of routes expected at the configured stop"
@@ -27,6 +33,11 @@ config UPDATE_STOP_FREQUENCY_SECONDS
     "update_stop_interval" key (net/pigeon_client.c), clamped there to
     5-45s -- the ceiling keeps main's watchdog-feeding loop inside
     MAX_TIME_INACTIVE_BEFORE_RESET_MS.
+
+    The compiled default must stay armed from boot even though passes
+    before the first shadow sync are skipped dark: those skipped passes
+    are where main feeds the watchdog, so a sign waiting out a long
+    platform outage stays alive to sync at all.
 
 config NUMBER_OF_DISPLAY_BOXES
   int "The number of display boxes connected to the sign"
@@ -105,6 +116,8 @@ config HTTP_REQUEST_RETRY_COUNT
   help
     Boot-time default only: runtime-overridable from the pigeon shadow's
     "http_retry_count" key (src/runtime_config.h), clamped to 0-3.
+    Inert until the first shadow sync: its only consumer is the Swiftly
+    fetch, which update_stop's boot gate holds until then.
 
 config HTTP_REQUEST_RETRY_BACKOFF_MS
   int "Delay before the first HTTP request retry, in milliseconds"
@@ -162,6 +175,10 @@ config PIGEON_CLIENT_POLL_INTERVAL_SECONDS
     pigeon-examples' https_init sample. Kept coarse by default: this is a
     mains-powered sign, but the LTE data budget for the poll's shadow GET
     plus telemetry POSTs still isn't free.
+
+    The one knob that cannot wait for the shadow: it paces the very sync
+    that delivers the shadow's own value, and the telemetry it schedules
+    is the fleet's first diagnostic signal on every boot.
 
 config PIGEON_CLIENT_THREAD_STACK_SIZE
   int "Pigeon client thread stack size (bytes)"
