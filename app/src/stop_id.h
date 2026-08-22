@@ -13,6 +13,7 @@
 #ifndef STOP_ID_H
 #define STOP_ID_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 /** Long enough for any real Swiftly stop ID with room to spare (the
@@ -37,5 +38,14 @@ void stop_id_set(const char* id);
 /** @brief Copy the current stop ID into buf (always NUL-terminated),
  *  truncating if buf_len is too small. Safe from any thread. */
 void stop_id_get(char* buf, size_t buf_len);
+
+/** @brief True once stop_id_set() has accepted a value this boot.
+ *
+ * The compiled-in CONFIG_STOP_ID seed does not count: while this is false,
+ * nothing has told this sign which stop it serves, only which stop its
+ * firmware happened to be built with. Set on the pigeon client thread (the
+ * only stop_id_set() caller), read from main, never cleared -- same locking
+ * as stop_id_get(), safe from any thread. */
+bool stop_id_synced(void);
 
 #endif  // STOP_ID_H

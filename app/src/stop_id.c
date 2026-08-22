@@ -14,6 +14,11 @@ static K_MUTEX_DEFINE(stop_id_lock);
 
 char current_stop_id[STOP_ID_MAX_LEN] = CONFIG_STOP_ID;
 
+/* False until stop_id_set() accepts its first value. Guarded by the same
+ * lock as the buffer so an observer that sees it true is also guaranteed
+ * to read the accepted value, not the compiled-in seed. */
+static bool synced;
+
 void stop_id_set(const char* id) {
   if (!id || !*id) {
     LOG_ERR("Refusing to set an empty stop ID");
@@ -22,15 +27,28 @@ void stop_id_set(const char* id) {
 
   k_mutex_lock(&stop_id_lock, K_FOREVER);
 
-  if (strncmp(current_stop_id, id, sizeof(current_stop_id)) == 0) {
-    k_mutex_unlock(&stop_id_lock);
-    return;
+  bool changed = strncmp(current_stop_id, id, sizeof(current_stop_id)) != 0;
+
+  if (changed) {
+    snprintk(current_stop_id, sizeof(current_stop_id), "%s", id);
   }
 
-  snprintk(current_stop_id, sizeof(current_stop_id), "%s", id);
+  /* An unchanged value still counts as a sync: a shadow confirming the
+   * compiled-in seed is an authoritative answer to "which stop", and the
+   * boot gate reading this flag must open on it. */
+  synced = true;
   k_mutex_unlock(&stop_id_lock);
 
-  LOG_INF("Stop ID updated to: %s", id);
+  if (changed) {
+    LOG_INF("Stop ID updated to: %s", id);
+  }
+}
+
+bool stop_id_synced(void) {
+  k_mutex_lock(&stop_id_lock, K_FOREVER);
+  bool s = synced;
+  k_mutex_unlock(&stop_id_lock);
+  return s;
 }
 
 void stop_id_get(char* buf, size_t buf_len) {
