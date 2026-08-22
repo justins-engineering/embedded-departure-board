@@ -249,6 +249,10 @@ int main(void) {
         }
       } else if (ret == UPDATE_STOP_NO_DEPARTURES) {
         lux = 0xFF;
+      } else if (ret == UPDATE_STOP_AWAITING_SYNC) {
+        /* Not a failure and not evidence of one: the displays stay dark
+         * until the first shadow sync names this sign's stop. The watchdog
+         * feed below still runs, so waiting cannot look like a hang. */
       } else if (pigeon_client_fota_active()) {
         /* A FOTA download saturates the LTE link enough to fail Swiftly
          * fetches; rebooting here would kill the download and burn a
@@ -278,7 +282,9 @@ int main(void) {
       }
 #else
       ret = update_stop();
-      if (ret && (ret != UPDATE_STOP_NO_DEPARTURES)) {
+      /* AWAITING_SYNC is a skipped pass, not a failed one: displays stay
+       * dark, the reset policy stays untouched, the feed below still runs. */
+      if (ret && (ret != UPDATE_STOP_NO_DEPARTURES) && (ret != UPDATE_STOP_AWAITING_SYNC)) {
         if (pigeon_client_fota_active()) {
           /* See the CONFIG_LIGHT_SENSOR branch's comment. */
           LOG_WRN("update_stop failed during FOTA download; skipping reset policy this cycle");
