@@ -7,7 +7,6 @@
 #include "display/display_switches.h"
 #include "net/lte_manager.h"
 #include "net/pigeon_client.h"
-#include "real_time_counter.h"
 #include "update_stop.h"
 #include "watchdog_app.h"
 
@@ -174,13 +173,7 @@ int main(void) {
     goto reset;
   }
 
-  if (k_sem_take(&lte_connected_sem, K_FOREVER) == 0) {
-    ret = set_rtc_time();
-    if (ret) {
-      LOG_ERR("Failed to set rtc.");
-      goto reset;
-    }
-  } else {
+  if (k_sem_take(&lte_connected_sem, K_FOREVER) != 0) {
     LOG_ERR("Failed to take network_connected_sem.");
     goto reset;
   }
@@ -219,16 +212,6 @@ int main(void) {
   (void)hwinfo_clear_reset_cause();
 
   while (1) {
-    if (k_sem_take(&rtc_sync_sem, K_NO_WAIT) == 0) {
-      ret = set_rtc_time();
-      if (ret) {
-        LOG_ERR("Failed to set rtc.");
-        goto reset;
-      }
-    } else {
-      LOG_DBG("Failed to take rtc_sync_sem");
-    }
-
     if (k_sem_take(&update_stop_sem, K_NO_WAIT) == 0) {
 #ifdef CONFIG_LIGHT_SENSOR
       ret = update_stop();
