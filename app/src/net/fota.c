@@ -38,8 +38,8 @@ void validate_image(void) {
   rc = boot_is_img_confirmed();
   LOG_INF("Image is%s confirmed OK", rc ? "" : " not");
   /* Confirmation is deliberately NOT done here anymore (it used to be):
-   * confirming a test-swapped image at the top of boot -- before LTE, NTP,
-   * or a single successful departure fetch -- defeats MCUboot's revert
+   * confirming a test-swapped image at the top of boot -- before LTE, or
+   * a single successful departure fetch -- defeats MCUboot's revert
    * safety net for exactly the images that need it (a FOTA'd build that
    * boots but can't do its job). See confirm_image_if_healthy(). */
 }

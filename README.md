@@ -348,8 +348,8 @@ pigeon's HTTPS path, and the app's own `custom_http_client.c`, whose
 Swiftly fetch. They run on different threads (the poller is created at
 `pigeon_client.c:755`; Swiftly runs off `update_stop_timer` on main) and
 share **no** lock — `pigeon_https_lock` serializes pigeon against pigeon
-and knows nothing about the app's client. Nothing else contends: NTP is
-UDP, and the remaining semaphores guard unrelated state.
+and knows nothing about the app's client. Nothing else contends: the
+remaining semaphores guard unrelated state.
 
 That is exactly the hazard `pigeon_https.c`'s own comment describes — the
 modem permits several concurrent TLS *sessions* but one handshake at a
@@ -659,10 +659,6 @@ reports the clamped (i.e. real) value. Full example:
   "stop_id": "73",
   "telemetry_interval": 300,
   "update_stop_interval": 30,
-  "ntp_server_primary": "time.nist.gov",
-  "ntp_server_fallback": "us.pool.ntp.org",
-  "ntp_timeout_ms": 4000,
-  "ntp_retry_count": 2,
   "http_retry_count": 1,
   "reboot": false,
   "firmware": { "version": "0.13.1", "size": 250000, "sha256": "<64 hex>" }
@@ -670,9 +666,10 @@ reports the clamped (i.e. real) value. Full example:
 ```
 
 Clamps: `update_stop_interval` 5–45s (the ceiling is the 60s hardware
-watchdog window — see `net/pigeon_client.c`), `ntp_timeout_ms` 500–30000,
-`ntp_retry_count` 1–5, `http_retry_count` 0–3. `reboot` is a one-shot
-command, never echoed in the ack. `firmware` drives FOTA (below).
+watchdog window — see `net/pigeon_client.c`), `http_retry_count` 0–3.
+`reboot` is a one-shot command, never echoed in the ack. `firmware`
+drives FOTA (below). Unknown keys are skipped by the decoder, so shadows
+that still carry the retired `ntp_*` set apply cleanly.
 
 **Fetch-failure policy.** Two build-time knobs sit behind
 `http_retry_count`, both in `app/Kconfig`. Retries are spaced rather than

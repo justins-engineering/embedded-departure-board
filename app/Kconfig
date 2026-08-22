@@ -87,9 +87,9 @@ config DNS_FAILURES_BEFORE_MODEM_RESTART
     window this is the only self-recovery the device has, which is also
     why the threshold sits well inside the ceiling rather than past it.
 
-    Only the Swiftly fetch feeds the count. NTP resolves rarely and
-    against a different host, so mixing it in would leave a streak
-    meaning nothing in particular.
+    Only the Swiftly fetch feeds the count. The pigeon client resolves
+    against a different host on its own thread and schedule, so mixing
+    it in would leave a streak meaning nothing in particular.
 
 #### LIGHT_SENSOR SETTINGS ####
 
@@ -147,37 +147,6 @@ config SWIFTLY_API_PATH
 config SWIFTLY_API_NUMBER_OF_PREDICTIONS
   string "The number of future predictions to return per route/stop in the response"
   default "1"
-
-#### NTP SETTINGS ####
-
-config PRIMARY_NTP_SERVER
-  string "Primary NTP server used to synchronize system time"
-  default "time.nist.gov"
-  help
-    Boot-time default only: runtime-overridable from the pigeon shadow's
-    "ntp_server_primary" key (src/runtime_config.h).
-
-config FALLBACK_NTP_SERVER
-  string "Fallback NTP server used to synchronize system time if the primary server is unavailable"
-  default "us.pool.ntp.org"
-  help
-    Boot-time default only: runtime-overridable from the pigeon shadow's
-    "ntp_server_fallback" key (src/runtime_config.h).
-
-config NTP_REQUEST_TIMEOUT_MS
-  int "Max amount of time allowed waiting for a single NTP query response for in milliseconds"
-  # The NIST time servers should never be queried more frequently than once every 4 seconds.
-  default 4000
-  help
-    Boot-time default only: runtime-overridable from the pigeon shadow's
-    "ntp_timeout_ms" key (src/runtime_config.h), clamped to 500-30000.
-
-config NTP_FETCH_RETRY_COUNT
-  int "Max attempts to fetch time from NTP server before changing to fallback server"
-  default 2
-  help
-    Boot-time default only: runtime-overridable from the pigeon shadow's
-    "ntp_retry_count" key (src/runtime_config.h), clamped to 1-5.
 
 #### PIGEON (PidgeIoT device management) SETTINGS ####
 # CONFIG_PIGEON/_ENDPOINT/_TOKEN/etc. are the `pigeon` module's own Kconfig

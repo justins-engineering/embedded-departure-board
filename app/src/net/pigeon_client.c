@@ -114,11 +114,7 @@ int pigeon_client_update_stop_interval_s(void) {
 #define UPDATE_STOP_INTERVAL_MIN_S 5
 #define UPDATE_STOP_INTERVAL_MAX_S 45
 
-/* Sanity bounds for the remaining int knobs; same clamp-and-ack policy. */
-#define NTP_TIMEOUT_MIN_MS 500
-#define NTP_TIMEOUT_MAX_MS 30000
-#define NTP_RETRY_MIN 1
-#define NTP_RETRY_MAX 5
+/* Sanity bounds for the remaining int knob; same clamp-and-ack policy. */
 #define HTTP_RETRY_MIN 0
 #define HTTP_RETRY_MAX 3
 
@@ -152,10 +148,6 @@ struct target_config_wire {
   char stop_id[STOP_ID_MAX_LEN];
   int telemetry_interval;
   int update_stop_interval;
-  char ntp_server_primary[RUNTIME_NTP_SERVER_MAX_LEN];
-  char ntp_server_fallback[RUNTIME_NTP_SERVER_MAX_LEN];
-  int ntp_timeout_ms;
-  int ntp_retry_count;
   int http_retry_count;
   struct display_wire displays[CONFIG_NUMBER_OF_DISPLAY_BOXES];
   size_t displays_len;
@@ -180,10 +172,6 @@ static const struct json_obj_descr target_config_descr[] = {
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, stop_id, JSON_TOK_STRING_BUF),
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, telemetry_interval, JSON_TOK_NUMBER),
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, update_stop_interval, JSON_TOK_NUMBER),
-    JSON_OBJ_DESCR_PRIM(struct target_config_wire, ntp_server_primary, JSON_TOK_STRING_BUF),
-    JSON_OBJ_DESCR_PRIM(struct target_config_wire, ntp_server_fallback, JSON_TOK_STRING_BUF),
-    JSON_OBJ_DESCR_PRIM(struct target_config_wire, ntp_timeout_ms, JSON_TOK_NUMBER),
-    JSON_OBJ_DESCR_PRIM(struct target_config_wire, ntp_retry_count, JSON_TOK_NUMBER),
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, http_retry_count, JSON_TOK_NUMBER),
     JSON_OBJ_DESCR_OBJ_ARRAY(
         struct target_config_wire, displays, CONFIG_NUMBER_OF_DISPLAY_BOXES, displays_len,
@@ -209,8 +197,8 @@ static const struct json_obj_descr target_config_descr[] = {
 #define TARGET_CONFIG_REQUIRED_BITS 0x1
 
 /* Descriptor-order bit of the "displays" array (KEEP IN SYNC with
- * target_config_descr: stop_id=0 ... http_retry_count=7, displays=8). */
-#define TARGET_CONFIG_DISPLAYS_BIT BIT(8)
+ * target_config_descr: stop_id=0 ... http_retry_count=3, displays=4). */
+#define TARGET_CONFIG_DISPLAYS_BIT BIT(4)
 
 #if defined(CONFIG_PIGEON_FOTA)
 
@@ -255,7 +243,7 @@ enum fw_action {
 
 static enum fw_action handle_firmware_target(const struct pigeon_fota_info* info) {
   /* The strpbrk arm keeps the ack's firmware echo JSON-safe, same policy
-   * as the stop_id/NTP strings in apply_target_config(). */
+   * as the stop_id string in apply_target_config(). */
   if (info->version[0] == '\0' || info->size <= 0 ||
       strlen(info->sha256) != PIGEON_FOTA_SHA256_HEX_LEN ||
       strpbrk(info->version, "\"\\") != NULL || strpbrk(info->sha256, "\"\\") != NULL) {
@@ -340,16 +328,10 @@ static void apply_target_config(
   struct target_config_wire cfg = {
       .telemetry_interval = applied_interval_s,
       .update_stop_interval = applied_update_stop_interval_s,
-      .ntp_timeout_ms = runtime_config_ntp_timeout_ms(),
-      .ntp_retry_count = runtime_config_ntp_retry_count(),
       .http_retry_count = runtime_config_http_retry_count(),
       .reboot = false,
   };
   stop_id_get(cfg.stop_id, sizeof(cfg.stop_id));
-  runtime_config_ntp_servers_get(
-      cfg.ntp_server_primary, sizeof(cfg.ntp_server_primary), cfg.ntp_server_fallback,
-      sizeof(cfg.ntp_server_fallback)
-  );
 
   /* Seed the displays array from the mapping currently in force, so an
    * omitted "displays" key keeps it AND the ack always reports the
@@ -376,11 +358,11 @@ static void apply_target_config(
     return;
   }
 
-  /* The ack below embeds these decoded strings back into raw JSON without
+  /* The ack below embeds this decoded string back into raw JSON without
    * an escaper -- a quote/backslash smuggled through a shadow value would
    * make every ack invalid (never converging, re-applying each poll), so
    * refuse such values outright rather than acking garbage. No real stop
-   * ID or hostname contains either character. */
+   * ID contains either character. */
   if (strpbrk(cfg.stop_id, "\"\\") != NULL) {
     LOG_ERR("Shadow stop_id contains JSON-unsafe characters; not applying");
     return;
@@ -388,15 +370,6 @@ static void apply_target_config(
 
   if (!honor_reboot) {
     cfg.reboot = false;
-  }
-
-  if (strpbrk(cfg.ntp_server_primary, "\"\\") != NULL ||
-      strpbrk(cfg.ntp_server_fallback, "\"\\") != NULL) {
-    LOG_ERR("Shadow NTP server contains JSON-unsafe characters; keeping current servers");
-    runtime_config_ntp_servers_get(
-        cfg.ntp_server_primary, sizeof(cfg.ntp_server_primary), cfg.ntp_server_fallback,
-        sizeof(cfg.ntp_server_fallback)
-    );
   }
 
   bool first_stop_sync = !stop_id_synced();
@@ -429,12 +402,7 @@ static void apply_target_config(
     );
   }
 
-  cfg.ntp_timeout_ms = clamp_int(cfg.ntp_timeout_ms, NTP_TIMEOUT_MIN_MS, NTP_TIMEOUT_MAX_MS);
-  cfg.ntp_retry_count = clamp_int(cfg.ntp_retry_count, NTP_RETRY_MIN, NTP_RETRY_MAX);
   cfg.http_retry_count = clamp_int(cfg.http_retry_count, HTTP_RETRY_MIN, HTTP_RETRY_MAX);
-  runtime_config_ntp_servers_set(cfg.ntp_server_primary, cfg.ntp_server_fallback);
-  runtime_config_ntp_timeout_ms_set(cfg.ntp_timeout_ms);
-  runtime_config_ntp_retry_count_set(cfg.ntp_retry_count);
   runtime_config_http_retry_count_set(cfg.http_retry_count);
 
   /* "displays": whole-array replacement, never a per-entry merge (the
@@ -512,10 +480,8 @@ static void apply_target_config(
   size_t ack_len = snprintk(
       current_config, sizeof(current_config),
       "{\"stop_id\":\"%s\",\"telemetry_interval\":%d,\"update_stop_interval\":%d,"
-      "\"ntp_server_primary\":\"%s\",\"ntp_server_fallback\":\"%s\",\"ntp_timeout_ms\":%d,"
-      "\"ntp_retry_count\":%d,\"http_retry_count\":%d",
-      cfg.stop_id, cfg.telemetry_interval, cfg.update_stop_interval, cfg.ntp_server_primary,
-      cfg.ntp_server_fallback, cfg.ntp_timeout_ms, cfg.ntp_retry_count, cfg.http_retry_count
+      "\"http_retry_count\":%d",
+      cfg.stop_id, cfg.telemetry_interval, cfg.update_stop_interval, cfg.http_retry_count
   );
 
   /* Effective route->display layout, always echoed (see the seeding
