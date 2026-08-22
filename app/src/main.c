@@ -131,7 +131,7 @@ int main(void) {
   }
 
   // Set all displays off because the LEDs have memory
-  for (size_t box = 0; box < CONFIG_NUMBER_OF_DISPLAY_BOXES; box++) {
+  for (size_t box = 0; box < DISPLAY_BOX_CAPACITY; box++) {
     ret = display_off(box);
     if (ret < 0) {
       LOG_ERR("Failed to set display switch %d off.", box);

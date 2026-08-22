@@ -149,7 +149,7 @@ struct target_config_wire {
   int telemetry_interval;
   int update_stop_interval;
   int http_retry_count;
-  struct display_wire displays[CONFIG_NUMBER_OF_DISPLAY_BOXES];
+  struct display_wire displays[DISPLAY_BOX_CAPACITY];
   size_t displays_len;
   bool reboot;
 #if defined(CONFIG_PIGEON_FOTA)
@@ -174,7 +174,7 @@ static const struct json_obj_descr target_config_descr[] = {
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, update_stop_interval, JSON_TOK_NUMBER),
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, http_retry_count, JSON_TOK_NUMBER),
     JSON_OBJ_DESCR_OBJ_ARRAY(
-        struct target_config_wire, displays, CONFIG_NUMBER_OF_DISPLAY_BOXES, displays_len,
+        struct target_config_wire, displays, DISPLAY_BOX_CAPACITY, displays_len,
         display_entry_descr, ARRAY_SIZE(display_entry_descr)
     ),
     JSON_OBJ_DESCR_PRIM(struct target_config_wire, reboot, JSON_TOK_TRUE),
@@ -447,7 +447,7 @@ static void apply_target_config(
   };
   stop_id_get(cfg.stop_id, sizeof(cfg.stop_id));
 
-  struct display_map_entry cur_map[CONFIG_NUMBER_OF_DISPLAY_BOXES];
+  struct display_map_entry cur_map[DISPLAY_BOX_CAPACITY];
   size_t cur_count = 0;
 
   display_map_get(cur_map, &cur_count);
@@ -494,7 +494,7 @@ static void apply_target_config(
    *
    * An OMITTED key is a different statement from a malformed one and
    * still means keep what you have. */
-  struct display_map_entry new_map[CONFIG_NUMBER_OF_DISPLAY_BOXES];
+  struct display_map_entry new_map[DISPLAY_BOX_CAPACITY];
   bool displays_present = (decoded & TARGET_CONFIG_DISPLAYS_BIT) != 0;
   bool displays_ok = true;
 
@@ -506,7 +506,7 @@ static void apply_target_config(
 
       if (w->r[0] == '\0' || strlen(w->r) >= DISPLAY_MAP_ROUTE_LEN ||
           strpbrk(w->r, "\"\\") != NULL || w->d[0] == '\0' || w->d[1] != '\0' ||
-          strpbrk(w->d, "\"\\") != NULL || w->p < 0 || w->p >= CONFIG_NUMBER_OF_DISPLAY_BOXES) {
+          strpbrk(w->d, "\"\\") != NULL || w->p < 0 || w->p >= DISPLAY_BOX_CAPACITY) {
         displays_ok = false;
         break;
       }

@@ -14,6 +14,20 @@
 
 LOG_MODULE_REGISTER(update_stop);
 
+/* Per-box hardware parameters, keyed by physical position.
+ *
+ * box_params_for_position() scans this by position and the shadow's
+ * mapping validator accepts any position below the capacity, so a table
+ * that did not cover every box would let a valid mapping resolve to no
+ * display at all -- a departure silently dropped rather than a rejected
+ * config. */
+static const DisplayBox display_boxes[] = DISPLAY_BOXES;
+
+BUILD_ASSERT(
+    ARRAY_SIZE(display_boxes) == DISPLAY_BOX_CAPACITY,
+    "DISPLAY_BOXES must carry one entry per display box"
+);
+
 K_TIMER_DEFINE(update_stop_timer, update_stop_timeout_handler, NULL);
 
 K_SEM_DEFINE(update_stop_sem, 1, 1);
@@ -21,8 +35,8 @@ K_SEM_DEFINE(update_stop_sem, 1, 1);
 /* Hardware parameters (brightness power cap, color) live in the static
  * DISPLAY_BOXES table keyed by physical position; the route->position
  * mapping itself is runtime (display_map.h, shadow-tunable). */
-static DisplayBox* box_params_for_position(const DisplayBox display_boxes[], uint8_t position) {
-  for (size_t box = 0; box < CONFIG_NUMBER_OF_DISPLAY_BOXES; box++) {
+static DisplayBox* box_params_for_position(uint8_t position) {
+  for (size_t box = 0; box < DISPLAY_BOX_CAPACITY; box++) {
     if (display_boxes[box].position == position) {
       return &display_boxes[box];
     }
@@ -44,24 +58,22 @@ static DisplayBox* box_params_for_position(const DisplayBox display_boxes[], uin
  * check for it rather than assume. Direction still has to agree either way,
  * which narrows it further. */
 static DisplayBox* get_display_address(
-    const DisplayBox display_boxes[], const struct display_map_entry map[], size_t map_count,
-    const char* route_id, const char* route_short_name, const char direction_code
+    const struct display_map_entry map[], size_t map_count, const char* route_id,
+    const char* route_short_name, const char direction_code
 ) {
   for (size_t i = 0; i < map_count; i++) {
     if (map[i].direction != direction_code) {
       continue;
     }
     if (!strncmp(route_id, map[i].route, 4) || !strncmp(route_short_name, map[i].route, 4)) {
-      return box_params_for_position(display_boxes, map[i].position);
+      return box_params_for_position(map[i].position);
     }
   }
   return NULL;
 }
 
-static int update_routes(
-    Stop stop, DisplayBox display_boxes[], const struct display_map_entry map[], size_t map_count
-) {
-  unsigned int times[6] = {0};
+static int update_routes(Stop stop, const struct display_map_entry map[], size_t map_count) {
+  unsigned int times[DISPLAY_BOX_CAPACITY] = {0};
 
   /* Summarised once at the end of the pass rather than logged per
    * destination. A route that matches no display mapping does so on every
@@ -76,7 +88,7 @@ static int update_routes(
   char unmatched_route[sizeof(stop.predictions_data[0].route_id)] = {0};
   char unmatched_direction = '\0';
 
-  for (size_t box = 0; box < CONFIG_NUMBER_OF_DISPLAY_BOXES; box++) {
+  for (size_t box = 0; box < DISPLAY_BOX_CAPACITY; box++) {
     (void)display_off(box);
   }
 
@@ -94,8 +106,8 @@ static int update_routes(
       }
 
       DisplayBox* display = get_display_address(
-          display_boxes, map, map_count, prediction_data.route_id,
-          prediction_data.route_short_name, destination.direction_id
+          map, map_count, prediction_data.route_id, prediction_data.route_short_name,
+          destination.direction_id
       );
       if (display != NULL) {
         LOG_INF(
@@ -180,7 +192,6 @@ int update_stop(void) {
    * net/pigeon_client.c) takes effect on the next call without a
    * reflash -- see stop_id.h's own docs for why this exists. */
   static Stop stop = {.id = current_stop_id};
-  static const DisplayBox display_boxes[] = DISPLAY_BOXES;
 
   /* 1024 (was 2048, RAM diet 2026-08-08): holds the OUTGOING request
    * (~300B, built in place by send_http_request) and then the response
@@ -221,12 +232,12 @@ int update_stop(void) {
   /* Snapshotted per pass, same cross-thread contract as stop_id: the
    * pigeon client thread may swap the mapping between passes, never
    * mid-pass. */
-  struct display_map_entry map[CONFIG_NUMBER_OF_DISPLAY_BOXES];
+  struct display_map_entry map[DISPLAY_BOX_CAPACITY];
   size_t map_count = 0;
 
   display_map_get(map, &map_count);
 
-  ret = update_routes(stop, display_boxes, map, map_count);
+  ret = update_routes(stop, map, map_count);
   if (ret) {
     failure_streak++;
     return 1;

@@ -16,7 +16,7 @@ static K_MUTEX_DEFINE(display_map_lock);
 /* Seeded from the compile-time DISPLAY_BOXES layout at first use -- the
  * Kconfig-default fallback when the shadow never supplies a "displays"
  * key (same convention as stop_id.c/runtime_config.c). */
-static struct display_map_entry map[CONFIG_NUMBER_OF_DISPLAY_BOXES];
+static struct display_map_entry map[DISPLAY_BOX_CAPACITY];
 static size_t map_count;
 static bool seeded;
 

@@ -128,7 +128,7 @@ int led_test_patern(void) {
     memcpy(&pixels[test], &pixel, sizeof(struct led_rgb));
     memcpy(&pixels[63 + test], &pixel, sizeof(struct led_rgb));
 
-    for (size_t i = 0; i < CONFIG_NUMBER_OF_DISPLAY_BOXES; i++) {
+    for (size_t i = 0; i < DISPLAY_BOX_CAPACITY; i++) {
       mux_set_active_port(mux, i);
       if (led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS) != 0) {
         LOG_ERR("Failed to update LED strip, test: %d", 0);
@@ -144,7 +144,7 @@ int led_test_patern(void) {
   LOG_INF("Running number display test.");
   static const DisplayBox display_boxes[] = DISPLAY_BOXES;
   for (size_t test = 0; test < 10; test++) {
-    for (size_t i = 0; i < CONFIG_NUMBER_OF_DISPLAY_BOXES; i++) {
+    for (size_t i = 0; i < DISPLAY_BOX_CAPACITY; i++) {
       if (write_num_to_display(
               &display_boxes[i], display_boxes[i].brightness, test * 111
           )) {
@@ -156,7 +156,7 @@ int led_test_patern(void) {
 
   LOG_INF("Number display test done. Setting enable pin low on all displays.");
 
-  for (size_t i = 0; i < CONFIG_NUMBER_OF_DISPLAY_BOXES; i++) {
+  for (size_t i = 0; i < DISPLAY_BOX_CAPACITY; i++) {
     if (display_off(i)) {
       return -1;
     }
@@ -180,7 +180,7 @@ int max_power_test(void) {
     return -1;
   }
 
-  for (size_t box = 0; box < CONFIG_NUMBER_OF_DISPLAY_BOXES; box++) {
+  for (size_t box = 0; box < DISPLAY_BOX_CAPACITY; box++) {
     if (display_off(box)) {
       return -1;
     }
@@ -188,7 +188,7 @@ int max_power_test(void) {
 
   LOG_INF("Running individual box power display test.");
 
-  for (size_t i = 0; i < CONFIG_NUMBER_OF_DISPLAY_BOXES; i++) {
+  for (size_t i = 0; i < DISPLAY_BOX_CAPACITY; i++) {
     if (i != 0) {
       if (display_off(i - 1)) {
         return -1;
@@ -203,7 +203,7 @@ int max_power_test(void) {
   }
 
   LOG_INF("Running max power display test.");
-  for (size_t j = 0; j < CONFIG_NUMBER_OF_DISPLAY_BOXES; j++) {
+  for (size_t j = 0; j < DISPLAY_BOX_CAPACITY; j++) {
     if (write_num_to_display(
             &display_boxes[j], display_boxes[j].brightness, 888
         )) {
