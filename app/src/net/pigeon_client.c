@@ -313,6 +313,37 @@ static enum fw_action handle_firmware_target(const struct pigeon_fota_info* info
 
 #endif /* CONFIG_PIGEON_FOTA */
 
+/* Re-arm update_stop_timer for a new period without pushing the next
+ * expiry further out than the one already pending.
+ *
+ * main's loop feeds the hardware watchdog only on a pass, and a pass only
+ * runs when this timer hands it update_stop_sem (main.c), so the gap
+ * between two expiries IS the watchdog interval. A plain k_timer_start()
+ * restarts the phase: raising the interval a moment before a pending
+ * expiry throws away a fetch that was seconds away and schedules one a
+ * whole new period out, making the feed gap the elapsed part of the old
+ * period plus all of the new one. For the range this knob already allows
+ * that reaches past MAX_TIME_INACTIVE_BEFORE_RESET_MS, so a routine
+ * retune from the dashboard could reset the sign it was retuning.
+ *
+ * Arming at whichever comes sooner, the time already owed or one new
+ * period, keeps the next feed no later than the old schedule promised
+ * while still converging on the new cadence within one period. The gap
+ * can then never exceed one old period, which was inside the window by
+ * construction (UPDATE_STOP_INTERVAL_MAX_S).
+ *
+ * pigeon_poll_timer needs none of this: nothing downstream of it feeds
+ * the watchdog, so restarting its phase only shifts a poll.
+ */
+static void rearm_update_stop_timer(int period_s) {
+  uint32_t period_ms = (uint32_t)period_s * MSEC_PER_SEC;
+  /* Zero when the timer is not running, which arms it immediately rather
+   * than opening a fresh unfed period. */
+  uint32_t first_ms = MIN(k_timer_remaining_get(&update_stop_timer), period_ms);
+
+  k_timer_start(&update_stop_timer, K_MSEC(first_ms), K_MSEC(period_ms));
+}
+
 /* Seed the wire form's displays array from a mapping, so an omitted
  * "displays" key keeps the current layout AND the ack always reports the
  * effective one (the whole point of the as-applied ack). */
@@ -515,9 +546,7 @@ static void apply_target_config(
   if (cfg.update_stop_interval != applied_update_stop_interval_s) {
     LOG_INF("Shadow update_stop_interval: %ds", cfg.update_stop_interval);
     applied_update_stop_interval_s = cfg.update_stop_interval;
-    k_timer_start(
-        &update_stop_timer, K_SECONDS(cfg.update_stop_interval), K_SECONDS(cfg.update_stop_interval)
-    );
+    rearm_update_stop_timer(cfg.update_stop_interval);
   }
 
   cfg.http_retry_count = clamp_int(cfg.http_retry_count, HTTP_RETRY_MIN, HTTP_RETRY_MAX);
