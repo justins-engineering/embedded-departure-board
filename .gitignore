@@ -50,3 +50,4 @@ releases/
 
 # Host test build output
 tests/parse_swiftly/.build/
+tests/stop_id/.build/
