@@ -729,11 +729,14 @@ array refuses the entire `target_config`: no stop, no interval changes, and
 on a sign that has not synced yet the display gate stays shut. Applying the
 stop while keeping the previous layout would put the right stop's departure
 times on the wrong boxes with nothing on the display saying so. An
-**omitted** key is a different statement and still keeps the current
-mapping (boot default: the compile-time `DISPLAY_BOXES` table, which the
-display gate keeps off the displays until a shadow has answered). The ack
-ALWAYS echoes the effective layout, on the refusal path too, so a rejected
-push shows up as a shadow that will not converge.
+**omitted** key keeps the current mapping, but only once there is one to
+keep: on a sign that has had no mapping applied this boot, a config
+without `displays` is refused as well, because the compiled
+`DISPLAY_BOXES` table is an artifact of which sign got built first rather
+than a layout anyone chose. So **`displays` is required on a sign's first
+sync of a boot** and optional on every config after it. The ack ALWAYS
+echoes the effective layout, on the refusal paths too, so a rejected push
+shows up as a shadow that will not converge.
 
 An array with **more entries than the capacity** is worse than an invalid
 one: it fails Zephyr's array decoder before any key is extracted, so the

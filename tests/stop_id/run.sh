@@ -31,13 +31,31 @@ if ! gcc -std=gnu11 -Wall -I"$HERE" -I"$SRC" -DCONFIG_STOP_ID="\"$STOP_ID\"" \
   exit 2
 fi
 
+# The display mapping carries the same seed-vs-synced distinction as the
+# stop id and gates the same boot behaviour, so it is exercised here rather
+# than in a harness of its own.
+if ! gcc -std=gnu11 -Wall -I"$HERE" -I"$SRC" \
+    -o "$BUILD/map" "$HERE/test_map_sync.c" "$SRC/display_map.c" \
+    > "$BUILD/map.buildlog" 2>&1; then
+  echo "FATAL: failed to build the display map tests" >&2
+  cat "$BUILD/map.buildlog" >&2
+  exit 2
+fi
+
+rc=0
+
 echo
 echo "== seed-vs-synced gate cases =="
-if "$BUILD/sync"; then
-  echo
+"$BUILD/sync" || rc=1
+
+echo
+echo "== display map seed-vs-synced cases =="
+"$BUILD/map" || rc=1
+
+echo
+if [ "$rc" -eq 0 ]; then
   echo "PASS: all stop_id tests green"
 else
-  echo
   echo "FAIL: see above"
   exit 1
 fi

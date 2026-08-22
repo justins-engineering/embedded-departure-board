@@ -23,6 +23,7 @@
 #ifndef DISPLAY_MAP_H
 #define DISPLAY_MAP_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -48,5 +49,19 @@ void display_map_get(struct display_map_entry* entries, size_t* count);
  *  were rejected by the caller's validation (net/pigeon_client.c). Safe
  *  from any thread. */
 void display_map_set(const struct display_map_entry* entries, size_t count);
+
+/** @brief True once display_map_set() has accepted a mapping this boot.
+ *
+ * The compile-time DISPLAY_BOXES seed does not count, for the same reason
+ * the compiled stop ID does not (stop_id.h): until a shadow supplies a
+ * layout, nothing has told this sign how ITS routes are laid out, only
+ * how they were laid out on whichever sign the firmware was built for.
+ *
+ * net/pigeon_client.c reads this to decide what an omitted "displays" key
+ * means. Omitting it is the keep-what-you-have contract, which is only a
+ * contract once there is something a person chose to keep; while this is
+ * false there is not, so a config that omits the key is refused instead.
+ * Safe from any thread. */
+bool display_map_synced(void);
 
 #endif  // DISPLAY_MAP_H

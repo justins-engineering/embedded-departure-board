@@ -28,4 +28,12 @@ static inline int k_mutex_unlock(struct k_mutex* mutex) {
 /* Same trim-and-NUL-terminate contract on the host. */
 #define snprintk snprintf
 
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+
+/* Left incomplete on purpose: display_map.c pulls in update_stop.h for the
+ * real DISPLAY_BOXES table, and that header also declares a timer and a
+ * semaphore this harness never touches. */
+struct k_timer;
+struct k_sem;
+
 #endif

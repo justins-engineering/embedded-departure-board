@@ -18,7 +18,15 @@ static K_MUTEX_DEFINE(display_map_lock);
  * key (same convention as stop_id.c/runtime_config.c). */
 static struct display_map_entry map[DISPLAY_BOX_CAPACITY];
 static size_t map_count;
+
+/* Distinct from synced below: seeded only records that the compiled
+ * fallback has been loaded, which happens lazily on the first read. */
 static bool seeded;
+
+/* False until display_map_set() accepts a mapping. Guarded by the same
+ * lock as the table, so an observer that sees it true is also guaranteed
+ * to read the accepted mapping rather than the seed. */
+static bool synced;
 
 static void seed_from_display_boxes(void) {
   static const DisplayBox defaults[] = DISPLAY_BOXES;
@@ -54,7 +62,15 @@ void display_map_set(const struct display_map_entry* entries, size_t count) {
   memcpy(map, entries, count * sizeof(map[0]));
   map_count = count;
   seeded = true;
+  synced = true;
   k_mutex_unlock(&display_map_lock);
 
   LOG_INF("Display map updated (%u entries)", (unsigned)count);
+}
+
+bool display_map_synced(void) {
+  k_mutex_lock(&display_map_lock, K_FOREVER);
+  bool s = synced;
+  k_mutex_unlock(&display_map_lock);
+  return s;
 }

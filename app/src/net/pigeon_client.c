@@ -427,6 +427,22 @@ static int report_current_config(
   return pigeon_shadow_report(target_version, current_config);
 }
 
+/* Restate what is actually in force over a config being refused, so the
+ * ack reports the sign rather than the rejected push. Every field the
+ * decode may have overwritten is put back; nothing has been applied by
+ * the time this runs, which is what makes a refusal total. */
+static void refuse_target_config(
+    int32_t target_version, struct target_config_wire* cfg,
+    const struct display_map_entry cur_map[], size_t cur_count
+) {
+  stop_id_get(cfg->stop_id, sizeof(cfg->stop_id));
+  cfg->telemetry_interval = applied_interval_s;
+  cfg->update_stop_interval = applied_update_stop_interval_s;
+  cfg->http_retry_count = runtime_config_http_retry_count();
+  seed_displays_from_map(cfg, cur_map, cur_count);
+  (void)report_current_config(target_version, cfg, false);
+}
+
 /* honor_reboot=false is the boot-seed path (see pigeon_client_cycle): a
  * CONVERGED shadow may still carry "reboot": true from a long-acked
  * operator command, and honoring it while re-applying at every boot would
@@ -511,8 +527,13 @@ static void apply_target_config(
    * that follows pairs it with whatever mapping happened to be in force.
    * Right stop, wrong boxes, and nothing on the displays says so.
    *
-   * An OMITTED key is a different statement from a malformed one and
-   * still means keep what you have. */
+   * An OMITTED key is a different statement from a malformed one, and
+   * means keep what you have -- but only once there is something a person
+   * chose to keep. Before any mapping has been applied this boot the only
+   * layout on hand is the compiled table, which belongs to whichever sign
+   * the firmware was built for and is nobody's stated choice, so a first
+   * config that omits the key is refused too. Later ones are not: by then
+   * an operator has said what the layout is. */
   struct display_map_entry new_map[DISPLAY_BOX_CAPACITY];
   bool displays_present = (decoded & TARGET_CONFIG_DISPLAYS_BIT) != 0;
   bool displays_ok = true;
@@ -536,19 +557,22 @@ static void apply_target_config(
     }
   }
 
+  /* Both refusals below are total: nothing above this point touched the
+   * running config, so no interval moves, no mapping swap, no stop, and
+   * the display gate stays shut on a sign that has not synced yet. The
+   * ack still goes out carrying the values actually in force. */
   if (!displays_ok) {
-    /* Nothing above this point touched the running config, so the refusal
-     * is total: no interval moves, no mapping swap, no stop, and the gate
-     * stays shut on a sign that has not yet had a first sync. The ack
-     * still goes out, carrying the values actually in force rather than
-     * the ones just refused. */
     LOG_ERR("Shadow displays array invalid; refusing the whole config");
-    stop_id_get(cfg.stop_id, sizeof(cfg.stop_id));
-    cfg.telemetry_interval = applied_interval_s;
-    cfg.update_stop_interval = applied_update_stop_interval_s;
-    cfg.http_retry_count = runtime_config_http_retry_count();
-    seed_displays_from_map(&cfg, cur_map, cur_count);
-    (void)report_current_config(target_version, &cfg, false);
+    refuse_target_config(target_version, &cfg, cur_map, cur_count);
+    return;
+  }
+
+  if (!displays_present && !display_map_synced()) {
+    LOG_ERR(
+        "Shadow target_config has no displays array and none has been applied this boot; "
+        "add displays (one {r,d,p} entry per box in use) before this sign can show anything"
+    );
+    refuse_target_config(target_version, &cfg, cur_map, cur_count);
     return;
   }
 
