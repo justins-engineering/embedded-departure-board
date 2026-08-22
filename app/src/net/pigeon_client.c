@@ -399,7 +399,17 @@ static void apply_target_config(
     );
   }
 
+  bool first_stop_sync = !stop_id_synced();
+
   stop_id_set(cfg.stop_id);
+
+  /* The first accepted stop ID ends the boot-time displays-dark gate
+   * (update_stop.h): kick a pass now rather than waiting out the rest of
+   * the update_stop timer period, so the sign fills within moments of
+   * learning its stop instead of up to a full interval later. */
+  if (first_stop_sync && stop_id_synced()) {
+    (void)k_sem_give(&update_stop_sem);
+  }
 
   if (cfg.telemetry_interval > 0 && cfg.telemetry_interval != applied_interval_s) {
     LOG_INF("Shadow telemetry_interval: %ds", cfg.telemetry_interval);
