@@ -313,6 +313,89 @@ static enum fw_action handle_firmware_target(const struct pigeon_fota_info* info
 
 #endif /* CONFIG_PIGEON_FOTA */
 
+/* Seed the wire form's displays array from a mapping, so an omitted
+ * "displays" key keeps the current layout AND the ack always reports the
+ * effective one (the whole point of the as-applied ack). */
+static void seed_displays_from_map(
+    struct target_config_wire* cfg, const struct display_map_entry map[], size_t count
+) {
+  cfg->displays_len = count;
+  for (size_t i = 0; i < count; i++) {
+    snprintk(cfg->displays[i].r, sizeof(cfg->displays[i].r), "%s", map[i].route);
+    cfg->displays[i].d[0] = map[i].direction;
+    cfg->displays[i].d[1] = '\0';
+    cfg->displays[i].p = map[i].position;
+  }
+}
+
+/* Report the config actually in force, minus "reboot" (see this file's
+ * struct doc comment) -- IN FORCE, not requested: clamped values are acked
+ * clamped, so the dashboard sees what the device really runs.
+ *
+ * Split out because the refusal path needs it too. A config this sign
+ * rejects must still be answered with what the sign is really running:
+ * staying silent is indistinguishable from a device that never polled,
+ * whereas an ack that disagrees with the target shows the operator both
+ * that the push was refused and which layout is still in force.
+ *
+ * @return pigeon_shadow_report()'s result, or -EMSGSIZE if the ack could
+ * not be built and nothing was sent.
+ */
+static int report_current_config(
+    int32_t target_version, const struct target_config_wire* cfg, bool ack_firmware
+) {
+#if !defined(CONFIG_PIGEON_FOTA)
+  ARG_UNUSED(ack_firmware);
+#endif
+
+  char current_config[CONFIG_PIGEON_SHADOW_CONFIG_MAX];
+  size_t ack_len = snprintk(
+      current_config, sizeof(current_config),
+      "{\"stop_id\":\"%s\",\"telemetry_interval\":%d,\"update_stop_interval\":%d,"
+      "\"http_retry_count\":%d",
+      cfg->stop_id, cfg->telemetry_interval, cfg->update_stop_interval, cfg->http_retry_count
+  );
+
+  /* Effective route->display layout, always echoed. */
+  if (ack_len < sizeof(current_config)) {
+    ack_len +=
+        snprintk(current_config + ack_len, sizeof(current_config) - ack_len, ",\"displays\":[");
+    for (size_t i = 0; i < cfg->displays_len && ack_len < sizeof(current_config); i++) {
+      ack_len += snprintk(
+          current_config + ack_len, sizeof(current_config) - ack_len,
+          "%s{\"r\":\"%s\",\"d\":\"%s\",\"p\":%d}", (i > 0) ? "," : "", cfg->displays[i].r,
+          cfg->displays[i].d, cfg->displays[i].p
+      );
+    }
+    if (ack_len < sizeof(current_config)) {
+      ack_len += snprintk(current_config + ack_len, sizeof(current_config) - ack_len, "]");
+    }
+  }
+
+#if defined(CONFIG_PIGEON_FOTA)
+  if (ack_firmware && ack_len < sizeof(current_config)) {
+    ack_len += snprintk(
+        current_config + ack_len, sizeof(current_config) - ack_len,
+        ",\"firmware\":{\"version\":\"%s\",\"size\":%d,\"sha256\":\"%s\"}",
+        cfg->firmware.version, cfg->firmware.size, cfg->firmware.sha256
+    );
+  }
+#endif
+
+  if (ack_len >= sizeof(current_config) - 1) {
+    /* Truncated ack would be invalid JSON; CONFIG_PIGEON_SHADOW_CONFIG_MAX
+     * is sized so this can't happen with in-range values -- treat it as a
+     * bug rather than sending garbage. */
+    LOG_ERR("Shadow ack overflowed its buffer (%u bytes); not reporting", (unsigned)ack_len);
+    return -EMSGSIZE;
+  }
+
+  current_config[ack_len] = '}';
+  current_config[ack_len + 1] = '\0';
+
+  return pigeon_shadow_report(target_version, current_config);
+}
+
 /* honor_reboot=false is the boot-seed path (see pigeon_client_cycle): a
  * CONVERGED shadow may still carry "reboot": true from a long-acked
  * operator command, and honoring it while re-applying at every boot would
@@ -333,20 +416,11 @@ static void apply_target_config(
   };
   stop_id_get(cfg.stop_id, sizeof(cfg.stop_id));
 
-  /* Seed the displays array from the mapping currently in force, so an
-   * omitted "displays" key keeps it AND the ack always reports the
-   * effective layout (the whole point of the as-applied ack). */
   struct display_map_entry cur_map[CONFIG_NUMBER_OF_DISPLAY_BOXES];
   size_t cur_count = 0;
 
   display_map_get(cur_map, &cur_count);
-  cfg.displays_len = cur_count;
-  for (size_t i = 0; i < cur_count; i++) {
-    snprintk(cfg.displays[i].r, sizeof(cfg.displays[i].r), "%s", cur_map[i].route);
-    cfg.displays[i].d[0] = cur_map[i].direction;
-    cfg.displays[i].d[1] = '\0';
-    cfg.displays[i].p = cur_map[i].position;
-  }
+  seed_displays_from_map(&cfg, cur_map, cur_count);
 
   int64_t decoded = json_obj_parse(
       (char*)target_config, strlen(target_config), target_config_descr,
@@ -375,6 +449,59 @@ static void apply_target_config(
     cfg.reboot = false;
   }
 
+  /* "displays": whole-array replacement, never a per-entry merge -- the
+   * shadow carries the complete layout for a stop. Validated HERE, ahead
+   * of every apply below, because a present-but-invalid array refuses the
+   * whole config rather than just the mapping.
+   *
+   * Applying the rest while silently keeping the previous layout is what
+   * puts one stop's departure times on another sign's boxes, and on a
+   * first sync it opens the boot gate doing it: the stop is accepted, the
+   * gate reads that as "a shadow named this sign's stop", and the pass
+   * that follows pairs it with whatever mapping happened to be in force.
+   * Right stop, wrong boxes, and nothing on the displays says so.
+   *
+   * An OMITTED key is a different statement from a malformed one and
+   * still means keep what you have. */
+  struct display_map_entry new_map[CONFIG_NUMBER_OF_DISPLAY_BOXES];
+  bool displays_present = (decoded & TARGET_CONFIG_DISPLAYS_BIT) != 0;
+  bool displays_ok = true;
+
+  if (displays_present) {
+    displays_ok = (cfg.displays_len > 0);
+
+    for (size_t i = 0; displays_ok && i < cfg.displays_len; i++) {
+      const struct display_wire* w = &cfg.displays[i];
+
+      if (w->r[0] == '\0' || strlen(w->r) >= DISPLAY_MAP_ROUTE_LEN ||
+          strpbrk(w->r, "\"\\") != NULL || w->d[0] == '\0' || w->d[1] != '\0' ||
+          strpbrk(w->d, "\"\\") != NULL || w->p < 0 || w->p >= CONFIG_NUMBER_OF_DISPLAY_BOXES) {
+        displays_ok = false;
+        break;
+      }
+
+      snprintk(new_map[i].route, sizeof(new_map[i].route), "%s", w->r);
+      new_map[i].direction = w->d[0];
+      new_map[i].position = (uint8_t)w->p;
+    }
+  }
+
+  if (!displays_ok) {
+    /* Nothing above this point touched the running config, so the refusal
+     * is total: no interval moves, no mapping swap, no stop, and the gate
+     * stays shut on a sign that has not yet had a first sync. The ack
+     * still goes out, carrying the values actually in force rather than
+     * the ones just refused. */
+    LOG_ERR("Shadow displays array invalid; refusing the whole config");
+    stop_id_get(cfg.stop_id, sizeof(cfg.stop_id));
+    cfg.telemetry_interval = applied_interval_s;
+    cfg.update_stop_interval = applied_update_stop_interval_s;
+    cfg.http_retry_count = runtime_config_http_retry_count();
+    seed_displays_from_map(&cfg, cur_map, cur_count);
+    (void)report_current_config(target_version, &cfg, false);
+    return;
+  }
+
   if (cfg.telemetry_interval > 0 && cfg.telemetry_interval != applied_interval_s) {
     LOG_INF("Shadow telemetry_interval: %ds", cfg.telemetry_interval);
     applied_interval_s = cfg.telemetry_interval;
@@ -396,42 +523,9 @@ static void apply_target_config(
   cfg.http_retry_count = clamp_int(cfg.http_retry_count, HTTP_RETRY_MIN, HTTP_RETRY_MAX);
   runtime_config_http_retry_count_set(cfg.http_retry_count);
 
-  /* "displays": whole-array replacement, never a per-entry merge (the
-   * shadow carries the complete layout for a stop). Any invalid entry
-   * rejects the WHOLE array -- half a layout is worse than the old one --
-   * and the ack then echoes the unchanged effective mapping. */
-  if ((decoded & TARGET_CONFIG_DISPLAYS_BIT) != 0) {
-    struct display_map_entry new_map[CONFIG_NUMBER_OF_DISPLAY_BOXES];
-    bool displays_ok = (cfg.displays_len > 0);
-
-    for (size_t i = 0; displays_ok && i < cfg.displays_len; i++) {
-      const struct display_wire* w = &cfg.displays[i];
-
-      if (w->r[0] == '\0' || strlen(w->r) >= DISPLAY_MAP_ROUTE_LEN ||
-          strpbrk(w->r, "\"\\") != NULL || w->d[0] == '\0' || w->d[1] != '\0' ||
-          strpbrk(w->d, "\"\\") != NULL || w->p < 0 || w->p >= CONFIG_NUMBER_OF_DISPLAY_BOXES) {
-        displays_ok = false;
-        break;
-      }
-
-      snprintk(new_map[i].route, sizeof(new_map[i].route), "%s", w->r);
-      new_map[i].direction = w->d[0];
-      new_map[i].position = (uint8_t)w->p;
-    }
-
-    if (displays_ok) {
-      display_map_set(new_map, cfg.displays_len);
-      LOG_INF("Shadow displays: %u entries applied", (unsigned)cfg.displays_len);
-    } else {
-      LOG_ERR("Shadow displays array invalid; keeping current mapping");
-      cfg.displays_len = cur_count;
-      for (size_t i = 0; i < cur_count; i++) {
-        snprintk(cfg.displays[i].r, sizeof(cfg.displays[i].r), "%s", cur_map[i].route);
-        cfg.displays[i].d[0] = cur_map[i].direction;
-        cfg.displays[i].d[1] = '\0';
-        cfg.displays[i].p = cur_map[i].position;
-      }
-    }
+  if (displays_present) {
+    display_map_set(new_map, cfg.displays_len);
+    LOG_INF("Shadow displays: %u entries applied", (unsigned)cfg.displays_len);
   }
 
   /* The stop is applied LAST of the config's display-affecting fields,
@@ -452,9 +546,9 @@ static void apply_target_config(
     (void)k_sem_give(&update_stop_sem);
   }
 
-#if defined(CONFIG_PIGEON_FOTA)
   bool ack_firmware = false;
 
+#if defined(CONFIG_PIGEON_FOTA)
   if ((decoded & TARGET_CONFIG_FW_BIT) != 0) {
     switch (handle_firmware_target(&cfg.firmware)) {
       case FW_ACK_RUNNING:
@@ -482,56 +576,7 @@ static void apply_target_config(
   }
 #endif /* CONFIG_PIGEON_FOTA */
 
-  /* Ack the config actually applied (minus "reboot", see this file's
-   * struct doc comment) -- APPLIED, not requested: clamped values are
-   * acked clamped, so the dashboard sees what the device really runs. */
-  char current_config[CONFIG_PIGEON_SHADOW_CONFIG_MAX];
-  size_t ack_len = snprintk(
-      current_config, sizeof(current_config),
-      "{\"stop_id\":\"%s\",\"telemetry_interval\":%d,\"update_stop_interval\":%d,"
-      "\"http_retry_count\":%d",
-      cfg.stop_id, cfg.telemetry_interval, cfg.update_stop_interval, cfg.http_retry_count
-  );
-
-  /* Effective route->display layout, always echoed (see the seeding
-   * comment above). */
-  if (ack_len < sizeof(current_config)) {
-    ack_len +=
-        snprintk(current_config + ack_len, sizeof(current_config) - ack_len, ",\"displays\":[");
-    for (size_t i = 0; i < cfg.displays_len && ack_len < sizeof(current_config); i++) {
-      ack_len += snprintk(
-          current_config + ack_len, sizeof(current_config) - ack_len,
-          "%s{\"r\":\"%s\",\"d\":\"%s\",\"p\":%d}", (i > 0) ? "," : "", cfg.displays[i].r,
-          cfg.displays[i].d, cfg.displays[i].p
-      );
-    }
-    if (ack_len < sizeof(current_config)) {
-      ack_len += snprintk(current_config + ack_len, sizeof(current_config) - ack_len, "]");
-    }
-  }
-
-#if defined(CONFIG_PIGEON_FOTA)
-  if (ack_firmware && ack_len < sizeof(current_config)) {
-    ack_len += snprintk(
-        current_config + ack_len, sizeof(current_config) - ack_len,
-        ",\"firmware\":{\"version\":\"%s\",\"size\":%d,\"sha256\":\"%s\"}", cfg.firmware.version,
-        cfg.firmware.size, cfg.firmware.sha256
-    );
-  }
-#endif
-
-  if (ack_len < sizeof(current_config) - 1) {
-    current_config[ack_len] = '}';
-    current_config[ack_len + 1] = '\0';
-  } else {
-    /* Truncated ack would be invalid JSON; CONFIG_PIGEON_SHADOW_CONFIG_MAX
-     * is sized so this can't happen with in-range values -- treat it as a
-     * bug rather than sending garbage. */
-    LOG_ERR("Shadow ack overflowed its buffer (%u bytes); not reporting", (unsigned)ack_len);
-    return;
-  }
-
-  int err = pigeon_shadow_report(target_version, current_config);
+  int err = report_current_config(target_version, &cfg, ack_firmware);
 
   if (err) {
     LOG_WRN(
