@@ -39,10 +39,6 @@ config UPDATE_STOP_FREQUENCY_SECONDS
     are where main feeds the watchdog, so a sign waiting out a long
     platform outage stays alive to sync at all.
 
-config NUMBER_OF_DISPLAY_BOXES
-  int "The number of display boxes connected to the sign"
-  default 6
-
 config MAX_TIME_INACTIVE_BEFORE_RESET_MS
   int "Maximum amount of time the system can remain inactive before it resets in milliseconds"
   default 60000
