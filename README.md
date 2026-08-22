@@ -157,6 +157,55 @@ rework, none of which compiles here — this app selects
 `CONFIG_PIGEON_CONNECTOR_HTTPS` and sets neither the CoAP nor the WS
 symbol.
 
+**0.13.6 (2026-08-22)**: the release that stops a sign showing wrong
+information. A board no longer lights anything until the platform has told
+it which stop it serves *and* how that stop's routes are laid out across
+its display boxes. Until the first full shadow config lands, the displays
+stay dark and the pass is skipped without counting as a failure, so the
+watchdog is still fed and a sign waiting on its first sync does not look
+like a failing one.
+
+**The trade is deliberate and worth stating plainly: a sign that cannot
+reach PidgeIoT at boot stays dark indefinitely.** There is no timeout
+fallback to the compiled default and no persistence across reboots. Both
+were considered and rejected, because the compiled default may name
+another sign's stop, which is the exact bad data this removes, and a
+persisted stop goes stale the moment the dashboard re-stops a sign. No
+data beats bad data. On the bench the first sync lands about 11 s after
+boot.
+
+Every compiled shadow default is now inert behind that gate, and the box
+count stopped being a build option: it is fixed at the six display
+switches the board wires, and how many a sign uses follows from how many
+positions its shadow mapping names. **One image now serves every sign.**
+The per-sign build matrix collapses to identity alone, the baked pigeon
+credential, and the `stop_414` / `stop_1670` branches are obsolete.
+
+The NTP/RTC subsystem is deleted. Nothing consumed it, both TLS paths take
+their time from the modem's network clock, and removing it takes with it a
+whole reset class (an NTP outage used to boot-loop a sign that was
+otherwise healthy) and a synchronous network call that ran on the same
+thread that feeds the watchdog.
+
+Self-recovery and diagnosis: the modem restarts itself after a long run of
+resolver failures, the fix for a DNS wedge that once needed a person; a
+transport lock closes a race between the log upload and the shadow poller;
+and the reset cause survives long enough for the platform to record why a
+board restarted. Two watchdog-adjacent fixes land with them: changing the
+update interval from the dashboard no longer skips a watchdog feed, and a
+config the sign refuses now reports the version it is actually running, so
+a bad push stays visible on the dashboard and gets retried instead of
+reading as converged while the sign sits dark.
+
+**Known open item:** two silent watchdog hangs were observed on the
+pre-fix train and are still under investigation. This release is gated on
+a soak covering them.
+
+As with every bump, **re-upload the log dictionary after flashing**: a new
+build's `log_dictionary.json` shares almost no string addresses with its
+predecessor, so the old one decodes this firmware's logs into
+plausible-looking garbage rather than failing.
+
 **0.13.5 (2026-08-14)** — a diagnostic build, one behavioural change from
 0.13.4: `read_rsrp_dbm()` now logs which of its two failure arms fired, so
 a missing signal reading records whether the modem refused the AT command
