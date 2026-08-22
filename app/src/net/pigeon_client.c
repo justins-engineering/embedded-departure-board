@@ -458,8 +458,27 @@ static void apply_target_config(
       ARRAY_SIZE(target_config_descr), &cfg
   );
 
-  if (decoded < 0 || (decoded & TARGET_CONFIG_REQUIRED_BITS) != TARGET_CONFIG_REQUIRED_BITS) {
-    LOG_ERR("Shadow target_config missing/invalid stop_id (decoded=%lld); not applying", decoded);
+  /* Split from the required-key check below because the two failures need
+   * different things looked at, and the combined message sent readers to
+   * the wrong one. A negative return is the whole document failing to
+   * decode, which blames stop_id only because stop_id is the one key this
+   * integration requires. The likelier causes are invisible from the key
+   * list: a "displays" array with more entries than the device has boxes
+   * fails the array decoder outright, and one malformed string value
+   * anywhere fails the parse before its own descriptor is reached.
+   * Nothing applies either way, and on a sign that has not synced yet
+   * that means dark until the shadow is corrected. */
+  if (decoded < 0) {
+    LOG_ERR(
+        "Shadow target_config did not decode (%lld); check for a displays array over %d "
+        "entries or a malformed string value",
+        decoded, DISPLAY_BOX_CAPACITY
+    );
+    return;
+  }
+
+  if ((decoded & TARGET_CONFIG_REQUIRED_BITS) != TARGET_CONFIG_REQUIRED_BITS) {
+    LOG_ERR("Shadow target_config carries no stop_id (decoded=%lld); not applying", decoded);
     return;
   }
 
