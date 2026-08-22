@@ -4,8 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "display/display_switches.h"
 #include "json/parse_swiftly.h"
 #include "stop.h"
+#include "update_stop.h"
 
 struct map_entry {
   const char *route;
@@ -40,6 +42,20 @@ static int lookup(
   return -1;
 }
 
+/* Mirrors box_params_for_position()'s scan, for the same reason lookup()
+ * mirrors get_display_address(): linking update_stop.c would drag in the
+ * display drivers and the kernel. The TABLE is the real one. */
+static const DisplayBox *params_for_position(int position) {
+  static const DisplayBox boxes[] = DISPLAY_BOXES;
+
+  for (size_t i = 0; i < sizeof(boxes) / sizeof(boxes[0]); i++) {
+    if (boxes[i].position == position) {
+      return &boxes[i];
+    }
+  }
+  return NULL;
+}
+
 static const char REAL[] =
     "{\"success\":true,\"data\":{\"agencyKey\":\"pvta\",\"predictionsData\":"
     "[{\"routeShortName\":\"G1\",\"routeId\":\"G101\",\"destinations\":"
@@ -69,6 +85,35 @@ int main(void) {
   /* Direction still gates the match. */
   printf("\ndirection still has to agree\n");
   check("right route, wrong direction -> no match", lookup(by_short, 1, "G101", "G1", '1'), -1);
+
+  /* Every box the mapping validator will accept a position for has
+   * parameters in the table, so a validated position always resolves to a
+   * real display. This is what lets one image serve a sign with fewer
+   * panels: the table stays full-length and the sign simply names fewer
+   * positions. */
+  printf("\nevery box position has hardware parameters\n");
+  for (int p = 0; p < DISPLAY_BOX_CAPACITY; p++) {
+    char what[52];
+    snprintf(what, sizeof(what), "position %d resolves to a parameters entry", p);
+    check(what, params_for_position(p) != NULL, 1);
+  }
+  check(
+      "a position past the capacity resolves to nothing",
+      params_for_position(DISPLAY_BOX_CAPACITY) == NULL, 1
+  );
+
+  /* Three routes on a six-box image, and deliberately not on the first
+   * three boxes. This is the shape a sign with fewer panels produces, and
+   * the case that breaks the moment the active set is taken to be a
+   * prefix of the boxes rather than the positions the mapping names. */
+  printf("\nsparse mapping, positions not a prefix\n");
+  const struct map_entry sparse[] = {{"G1", '0', 0}, {"G2", '0', 2}, {"X92", '1', 5}};
+  check("first entry keeps its position", lookup(sparse, 3, "G1", "G1", '0'), 0);
+  check("second entry skips a box", lookup(sparse, 3, "G2", "G2", '0'), 2);
+  check("third entry lands on the last box", lookup(sparse, 3, "X92", "X92", '1'), 5);
+  check("a route the mapping omits matches nothing", lookup(sparse, 3, "B43", "B43", '0'), -1);
+  printf("  NOTE: boxes 1, 3 and 4 are named by nothing, so update_routes writes\n");
+  printf("        none of them and its per-pass sweep leaves them dark.\n");
 
   /* The parser really does populate both fields from a real-shaped payload. */
   printf("\nparser populates both fields\n");
