@@ -373,7 +373,7 @@ static void seed_displays_from_map(
  * not be built and nothing was sent.
  */
 static int report_current_config(
-    int32_t target_version, const struct target_config_wire* cfg, bool ack_firmware
+    int32_t current_version, const struct target_config_wire* cfg, bool ack_firmware
 ) {
 #if !defined(CONFIG_PIGEON_FOTA)
   ARG_UNUSED(ack_firmware);
@@ -424,23 +424,39 @@ static int report_current_config(
   current_config[ack_len] = '}';
   current_config[ack_len + 1] = '\0';
 
-  return pigeon_shadow_report(target_version, current_config);
+  return pigeon_shadow_report(current_version, current_config);
 }
+
+/* The target_version this device has actually applied and acked this boot.
+ * 0 is the platform's own "nothing applied" value: the shadow's
+ * current_version column defaults to it, and dovecote stores whatever a
+ * device reports without re-deriving it from target_version. Written on
+ * the pigeon thread only. */
+static int32_t applied_version;
 
 /* Restate what is actually in force over a config being refused, so the
  * ack reports the sign rather than the rejected push. Every field the
  * decode may have overwritten is put back; nothing has been applied by
  * the time this runs, which is what makes a refusal total. */
 static void refuse_target_config(
-    int32_t target_version, struct target_config_wire* cfg,
-    const struct display_map_entry cur_map[], size_t cur_count
+    struct target_config_wire* cfg, const struct display_map_entry cur_map[], size_t cur_count
 ) {
   stop_id_get(cfg->stop_id, sizeof(cfg->stop_id));
   cfg->telemetry_interval = applied_interval_s;
   cfg->update_stop_interval = applied_update_stop_interval_s;
   cfg->http_retry_count = runtime_config_http_retry_count();
   seed_displays_from_map(cfg, cur_map, cur_count);
-  (void)report_current_config(target_version, cfg, false);
+
+  /* The version LAST APPLIED, never the one being refused. Acking the
+   * refused target would report the device as converged on a config it is
+   * not running, which stops pigeon_client_cycle from ever offering it
+   * again this boot -- so a sign whose first push carried a bad mapping
+   * would sit dark behind a dashboard reading converged, until someone
+   * rebooted it. Reporting what is really applied keeps target and
+   * current apart, so the platform shows the disagreement and the device
+   * re-attempts the target on every later poll, re-refusing it with its
+   * log line until the shadow is corrected. */
+  (void)report_current_config(applied_version, cfg, false);
 }
 
 /* honor_reboot=false is the boot-seed path (see pigeon_client_cycle): a
@@ -563,7 +579,7 @@ static void apply_target_config(
    * ack still goes out carrying the values actually in force. */
   if (!displays_ok) {
     LOG_ERR("Shadow displays array invalid; refusing the whole config");
-    refuse_target_config(target_version, &cfg, cur_map, cur_count);
+    refuse_target_config(&cfg, cur_map, cur_count);
     return;
   }
 
@@ -572,7 +588,7 @@ static void apply_target_config(
         "Shadow target_config has no displays array and none has been applied this boot; "
         "add displays (one {r,d,p} entry per box in use) before this sign can show anything"
     );
-    refuse_target_config(target_version, &cfg, cur_map, cur_count);
+    refuse_target_config(&cfg, cur_map, cur_count);
     return;
   }
 
@@ -655,6 +671,11 @@ static void apply_target_config(
         "pigeon_shadow_report failed: %d%s", err,
         cfg.reboot ? " -- deferring shadow-requested reboot until the ack lands" : ""
     );
+  } else {
+    /* Only now is this the version the platform believes is running, which
+     * is what a later refusal has to fall back to. A failed ack leaves it
+     * where it was, matching what the platform still holds. */
+    applied_version = target_version;
   }
 
   /* Reboot only once the ack landed: an unacked reboot would refire on
