@@ -358,30 +358,21 @@ static void apply_target_config(
     return;
   }
 
-  /* The ack below embeds this decoded string back into raw JSON without
-   * an escaper -- a quote/backslash smuggled through a shadow value would
-   * make every ack invalid (never converging, re-applying each poll), so
-   * refuse such values outright rather than acking garbage. No real stop
-   * ID contains either character. */
-  if (strpbrk(cfg.stop_id, "\"\\") != NULL) {
-    LOG_ERR("Shadow stop_id contains JSON-unsafe characters; not applying");
+  /* Refused outright, whole config, for two reasons. An empty stop_id
+   * would slip past the required-bits check (the key decoded, to nothing)
+   * and reach stop_id_set() as a reject the gate logic below could not
+   * tell from an accept. And the ack embeds this decoded string back into
+   * raw JSON without an escaper -- a quote/backslash smuggled through a
+   * shadow value would make every ack invalid (never converging,
+   * re-applying each poll) -- so refuse rather than ack garbage. No real
+   * stop ID is empty or contains either character. */
+  if (cfg.stop_id[0] == '\0' || strpbrk(cfg.stop_id, "\"\\") != NULL) {
+    LOG_ERR("Shadow stop_id empty or JSON-unsafe; not applying");
     return;
   }
 
   if (!honor_reboot) {
     cfg.reboot = false;
-  }
-
-  bool first_stop_sync = !stop_id_synced();
-
-  stop_id_set(cfg.stop_id);
-
-  /* The first accepted stop ID ends the boot-time displays-dark gate
-   * (update_stop.h): kick a pass now rather than waiting out the rest of
-   * the update_stop timer period, so the sign fills within moments of
-   * learning its stop instead of up to a full interval later. */
-  if (first_stop_sync && stop_id_synced()) {
-    (void)k_sem_give(&update_stop_sem);
   }
 
   if (cfg.telemetry_interval > 0 && cfg.telemetry_interval != applied_interval_s) {
@@ -441,6 +432,24 @@ static void apply_target_config(
         cfg.displays[i].p = cur_map[i].position;
       }
     }
+  }
+
+  /* The stop is applied LAST of the config's display-affecting fields,
+   * the "displays" mapping included: accepting it is what opens
+   * update_stop's boot gate (stop_id_synced), so by the time a pass can
+   * run, everything else this target_config carried is already in force.
+   * Applied any earlier, the first pass could pair the shadow's stop with
+   * the compiled-in mapping -- right stop, wrong boxes. */
+  bool first_stop_sync = !stop_id_synced();
+
+  stop_id_set(cfg.stop_id);
+
+  /* The first accepted config ends the boot-time displays-dark gate
+   * (update_stop.h): kick a pass now rather than waiting out the rest of
+   * the update_stop timer period, so the sign fills within moments of
+   * learning its stop instead of up to a full interval later. */
+  if (first_stop_sync && stop_id_synced()) {
+    (void)k_sem_give(&update_stop_sem);
   }
 
 #if defined(CONFIG_PIGEON_FOTA)

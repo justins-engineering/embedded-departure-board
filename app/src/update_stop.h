@@ -37,16 +37,21 @@ void update_stop_timeout_handler(struct k_timer* timer_id);
  */
 #define UPDATE_STOP_NO_DEPARTURES 2
 
-/** @brief update_stop() did nothing: no shadow-supplied stop ID yet this boot.
+/** @brief update_stop() did nothing: no shadow config applied yet this boot.
  *
  * Until the first shadow sync lands, the only stop ID on hand is the
- * compiled-in CONFIG_STOP_ID seed, which may be some other sign's stop --
- * fetching it would put real departure times for the wrong stop on the
- * displays. Showing nothing is better than showing wrong times, so the
- * pass is skipped outright: no fetch, no display writes, and neither the
- * failure streak nor the last-success age moves. A freshly booted sign
- * waiting on its first sync is not a failing one, and callers must not
- * treat this as a failure either (reset policy, image confirmation).
+ * compiled-in CONFIG_STOP_ID seed and the only route layout the
+ * compiled-in DISPLAY_BOXES mapping, either of which may belong to some
+ * other sign -- fetching would put real departure times for the wrong
+ * stop, or the right stop's times on the wrong boxes, on the displays.
+ * Showing nothing is better than showing wrong times, so the pass is
+ * skipped outright: no fetch, no display writes, and neither the failure
+ * streak nor the last-success age moves. The gate reads stop_id_synced(),
+ * which the pigeon client opens only as the final step of applying a
+ * whole target_config (net/pigeon_client.c), mapping included. A freshly
+ * booted sign waiting on its first sync is not a failing one, and callers
+ * must not treat this as a failure either (reset policy, image
+ * confirmation).
  */
 #define UPDATE_STOP_AWAITING_SYNC 3
 

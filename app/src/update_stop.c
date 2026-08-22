@@ -164,12 +164,13 @@ int swiftly_last_success_age_s(void) {
 }
 
 int update_stop(void) {
-  /* The buffer behind stop.id still holds the compiled-in seed until the
-   * shadow names a stop (see UPDATE_STOP_AWAITING_SYNC). Warning level so
+  /* The buffer behind stop.id still holds the compiled-in seed, and the
+   * display mapping its compiled-in layout, until the shadow's first
+   * config applies (see UPDATE_STOP_AWAITING_SYNC). Warning level so
    * release builds, which drop anything lower, still say why a sign that
    * cannot reach the platform is sitting dark. */
   if (!stop_id_synced()) {
-    LOG_WRN("No stop ID from the shadow yet; leaving displays dark");
+    LOG_WRN("No shadow config yet; leaving displays dark");
     return UPDATE_STOP_AWAITING_SYNC;
   }
 
