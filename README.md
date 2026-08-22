@@ -696,10 +696,10 @@ masked on that path (a converged shadow can still carry a long-acked
 `"reboot": true`, which must not refire every boot), and a pristine
 shadow (`target_version` 0, nothing ever pushed) is skipped outright.
 
-**`displays` (added 2026-08-02): the route→display-box layout — the LAST
-per-stop compile-time knob.** With `stop_id` and `displays` both
-shadow-tunable, one firmware image serves any stop and the per-stop
-branch model (`stop_73`, `stop_1670`, …) is fully obsolete. Shape:
+**`displays` (added 2026-08-02): the route→display-box layout.** With
+`stop_id` and `displays` both shadow-tunable, one firmware image serves
+any stop and the per-stop branch model (`stop_73`, `stop_1670`, …) is
+fully obsolete. Shape:
 
 ```json
 "displays": [
@@ -710,18 +710,49 @@ branch model (`stop_73`, `stop_1670`, …) is fully obsolete. Shape:
 ```
 
 `r` = route id (≤4 chars), `d` = Swiftly directionId code (exactly one
-char), `p` = physical box position (0–5). Whole-array replacement, never
-a per-entry merge; any invalid entry rejects the entire array (a half
-layout is worse than the old one). Omitted key keeps the current mapping
-(boot default: the compile-time `DISPLAY_BOXES` table). The ack ALWAYS
-echoes the effective layout. Per-box color/brightness stay compile-time
-on purpose — brightness is a per-box power cap the shadow must never be
-able to raise (`update_stop.h`).
+char), `p` = physical box position. Valid positions are `0` to
+`DISPLAY_BOX_CAPACITY - 1`, currently `0`–`5`: that bound comes from the
+display switches the board overlay wires, not from a build option, and is
+asserted against both the switch table and the `DISPLAY_BOXES` parameter
+table at compile time.
+
+**The mapping's positions are the active set.** A box no entry names is
+never turned on: `update_routes` sweeps every box off at the top of each
+pass and writes only positions a matched entry returns. A sign with fewer
+physical panels than the board has switch outputs therefore needs no build
+of its own, it just names fewer positions; a switch with no panel behind it
+enables nothing. The positions need not be contiguous either, so `0, 2, 5`
+is a valid three-box layout.
+
+Whole-array replacement, never a per-entry merge. A **present but invalid**
+array refuses the entire `target_config`: no stop, no interval changes, and
+on a sign that has not synced yet the display gate stays shut. Applying the
+stop while keeping the previous layout would put the right stop's departure
+times on the wrong boxes with nothing on the display saying so. An
+**omitted** key is a different statement and still keeps the current
+mapping (boot default: the compile-time `DISPLAY_BOXES` table, which the
+display gate keeps off the displays until a shadow has answered). The ack
+ALWAYS echoes the effective layout, on the refusal path too, so a rejected
+push shows up as a shadow that will not converge.
+
+An array with **more entries than the capacity** is worse than an invalid
+one: it fails Zephyr's array decoder before any key is extracted, so the
+whole document is refused with no `stop_id` either. Keep it to six.
+
+Per-box color/brightness stay compile-time on purpose: brightness is a
+per-box power cap the shadow must never be able to raise (`update_stop.h`).
 
 **Verified end-to-end 2026-08-02** (shadow v4): stop 1670's real 3-route
 layout applied and echoed back exactly; unmapped positions stay dark by
 construction (`update_routes` turns every box off at the top of each pass
 and writes only mapped positions).
+
+With the box count no longer a build option, **nothing about a sign's stop
+or its physical layout is compiled in any more**. One image serves the
+whole fleet and the per-stop branches (`stop_73`, `stop_414`, `stop_1670`)
+carry nothing a build still needs. What remains per-sign is the baked
+pigeon credential, `CONFIG_PIGEON_ENDPOINT` and `CONFIG_PIGEON_TOKEN` from
+a gitignored `app/prj.local.conf`, which has no runtime provisioning path.
 
 ### Remote dictionary logs (task #2)
 

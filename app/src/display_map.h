@@ -1,15 +1,19 @@
 /** @file display_map.h
  *  @brief Runtime-mutable route -> display-box mapping.
  *
- * The LAST per-stop compile-time knob: DISPLAY_BOXES (update_stop.h) bakes
- * in which route/direction lands on which physical display box, which is
- * why per-stop branches (stop_73, stop_1670, ...) existed at all. This
- * module holds the same mapping in a small mutable table, seeded from
- * DISPLAY_BOXES as the fallback default, so net/pigeon_client.c can
- * repoint it at runtime from the shadow's "displays" target_config key --
- * with this, one firmware image serves any stop and the per-stop branch
- * model is fully obsolete (stop_id.h covers WHICH stop, this covers HOW
- * its routes are laid out).
+ * DISPLAY_BOXES (update_stop.h) used to bake in which route/direction
+ * lands on which physical display box, which is why per-stop branches
+ * (stop_73, stop_1670, ...) existed at all. This module holds the same
+ * mapping in a small mutable table, seeded from DISPLAY_BOXES as the
+ * fallback default, so net/pigeon_client.c can repoint it at runtime from
+ * the shadow's "displays" target_config key (stop_id.h covers WHICH stop,
+ * this covers HOW its routes are laid out).
+ *
+ * The entries are also the active set. Positions run to
+ * DISPLAY_BOX_CAPACITY, which is how many display switches the board
+ * wires rather than how many panels a given sign has, and a box no entry
+ * names is simply never turned on -- so a shorter mapping is all a sign
+ * with fewer panels needs, and nothing about its layout is compiled in.
  *
  * Per-box hardware parameters (color, brightness -- the latter a per-box
  * POWER LIMIT, see update_stop.h) deliberately stay compile-time: the
