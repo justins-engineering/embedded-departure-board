@@ -132,5 +132,11 @@ This repo includes `.vscode/tasks.json` to make development easier. The included
   - Useful for debugging via AT commands. Use a serial console to send AT commands
 
 ## Creating a Release
-Update the [VERSION file](app/VERSION).
-On a successful push to the main branch the [release workflow](.github/workflows/release.yml) will create a new release, generate release notes, and upload the freshly built hex/bin files to the release.
+Update the [VERSION file](app/VERSION) and tag the commit.
+
+Releases are not published from CI here. The [build workflow](.github/workflows/build.yml)
+runs on pushes to `main` and on `v*` tags and keeps its output as workflow
+artifacts, but it builds the test profile against the example configuration, so
+those artifacts are a build check rather than something to flash. A release image
+is built locally with the signing key and the sign's own configuration, per
+[Release](#release) above.

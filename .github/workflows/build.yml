@@ -1,17 +1,9 @@
 name: Build
 on:
-  workflow_call:
-    inputs:
-      release_build:
-        description: 'Is this build for release?'
-        type: boolean
-  workflow_dispatch:
-    inputs:
-      release_build:
-        description: 'Is this build for release?'
-        type: boolean
   push:
     branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -85,46 +77,32 @@ jobs:
             zephyr/
           key: ${{ runner.os }}-west-cache-${{ hashFiles('app/west.yml') }}
 
-      - name: Add secret key files
-        if: ${{ inputs.release_build }}
-        env:
-          BOOT_ECDSA_P256: ${{ secrets.BOOT_ECDSA_P256 }}
-          SWIFTLY_API_KEY: ${{ secrets.SWIFTLY_API_KEY }}
+      # A sign's stop and route mapping are untracked, so CI builds against the
+      # tracked examples. That also keeps the overlay path itself under test.
+      - name: Use the example per-sign configuration
         run: |
-          mkdir ./app/keys/private/
-          echo "$BOOT_ECDSA_P256" >> ./app/keys/private/boot-ecdsa-p256.pem
-          echo "$SWIFTLY_API_KEY" >> ./app/keys/private/swiftly-api.key
+          cp app/prj.example.conf app/prj.local.conf
+          cp app/src/display_boxes.example.h app/src/display_boxes.local.h
 
       - name: Mark mounted git repositories as trusted
         run: git config --global --add safe.directory '*'
 
-      - name: Build Zephyr app test
-        if: ${{ !inputs.release_build }}
+      - name: Build Zephyr app
         env:
           ZEPHYR_TOOLCHAIN_VARIANT: zephyr
           BOARD: circuitdojo_feather/nrf9160/ns
         run: west build --sysbuild ./app -p -- -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build Zephyr app for release
-        if: ${{ inputs.release_build }}
-        env:
-          ZEPHYR_TOOLCHAIN_VARIANT: zephyr
-          BOARD: circuitdojo_feather/nrf9160/ns
-        run: west build --sysbuild ./app -p -- -DFILE_SUFFIX=release -DCMAKE_BUILD_TYPE=Release
-
-      - name: Extract branch name
-        run: echo "BRANCH=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}" >> $GITHUB_ENV
-
+      # Signed with MCUboot's published debug key and built against the example
+      # stop, so these are a build check rather than something to flash a sign with.
       - name: Upload merged.hex
-        if: ${{ inputs.release_build }}
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.BRANCH }}_merged.hex
+          name: ${{ github.ref_name }}_merged.hex
           path: build/merged.hex
 
       - name: Upload zephyr.signed.bin
-        if: ${{ inputs.release_build }}
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.BRANCH }}_zephyr.signed.bin
+          name: ${{ github.ref_name }}_zephyr.signed.bin
           path: build/app/zephyr/zephyr.signed.bin
