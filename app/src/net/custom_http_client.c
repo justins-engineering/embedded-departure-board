@@ -19,6 +19,16 @@ LOG_MODULE_REGISTER(custom_http_client);
   CONFIG_SWIFTLY_API_PATH "?stop=" CONFIG_STOP_ID \
                           "&number=" CONFIG_SWIFTLY_API_NUMBER_OF_PREDICTIONS
 
+/* Both halves of the request path are pasted in at compile time, so leaving one
+ * unset builds a sign that queries the wrong thing and says nothing about it. */
+BUILD_ASSERT(
+    sizeof(CONFIG_SWIFTLY_API_PATH) > 1,
+    "CONFIG_SWIFTLY_API_PATH is unset; set it in app/prj.local.conf"
+);
+BUILD_ASSERT(
+    sizeof(CONFIG_STOP_ID) > 1, "CONFIG_STOP_ID is unset; set it in app/prj.local.conf"
+);
+
 static const char swiftly_api_key[] = {
 #include "../keys/private/swiftly-api.key"
 };

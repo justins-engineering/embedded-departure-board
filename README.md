@@ -68,7 +68,9 @@ merged after `app/prj.conf` and `app/sign.conf`, so anything it sets wins.
 and must name exactly `CONFIG_NUMBER_OF_DISPLAY_BOXES` of them.
 
 Both files are listed in `.gitignore`, so a deployment's own configuration stays
-out of the repository and one checkout can build any sign.
+out of the repository and one checkout can build any sign. Neither has a tracked
+fallback: a build without them fails and names the file it wants, rather than
+producing an image that queries another sign's stop.
 
 ### Testing
 
