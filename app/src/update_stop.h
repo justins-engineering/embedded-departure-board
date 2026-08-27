@@ -3,6 +3,15 @@
 
 #include <zephyr/kernel.h>
 
+/* A sign's route-to-box mapping describes one physical sign, so a build takes
+ * it from an untracked header when the deployment supplies one. */
+#if defined(__has_include)
+#if __has_include("display_boxes.local.h")
+#include "display_boxes.local.h"
+#endif
+#endif
+
+#ifndef DISPLAY_BOXES
 /** Specify the route id, position, direction, color, and brightness for each display box */
 // clang-format off
 #define DISPLAY_BOXES {                                                                          \
@@ -14,6 +23,7 @@
   { .id = "B79",  .position = 5, .direction_code = '0', .color = 0x00FF00, .brightness = 0x45 }  \
 }
 // clang-format on
+#endif  // DISPLAY_BOXES
 
 /** @param brightness The max brightness allowed with all LEDS (888) on  without
  * going above the 126mA per display limit */

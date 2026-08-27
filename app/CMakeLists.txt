@@ -4,6 +4,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(EXTRA_CONF_FILE ${CMAKE_CURRENT_SOURCE_DIR}/sign.conf)
 
+# Which stop a sign serves, and whose predictions API it reads, describe one
+# deployment rather than this source tree, so they arrive from an untracked
+# overlay. Merging it last lets it win over both prj.conf and sign.conf.
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/prj.local.conf)
+  list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_SOURCE_DIR}/prj.local.conf)
+endif()
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(embedded-departure-board)
 

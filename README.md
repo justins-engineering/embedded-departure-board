@@ -52,6 +52,24 @@ Currently this build requires a 32 bit [Swiftly](https://www.goswift.ly/) API ke
 
 If you would like a functioning API key, [you can request one here](https://swiftly.zendesk.com/hc/en-us/requests/new?ticket_form_id=33738491027469).
 
+### Per-sign configuration
+Which stop a sign serves, whose predictions API it reads, and how that stop's
+routes are laid out across its display boxes all describe one physical sign, so
+they are not tracked here. Supply them from two untracked files before building:
+
+```sh
+cp app/prj.example.conf app/prj.local.conf
+cp app/src/display_boxes.example.h app/src/display_boxes.local.h
+```
+
+Then edit both with the values for the sign being built. `app/prj.local.conf` is
+merged after `app/prj.conf` and `app/sign.conf`, so anything it sets wins.
+`app/src/display_boxes.local.h` defines `DISPLAY_BOXES` with one entry per box,
+and must name exactly `CONFIG_NUMBER_OF_DISPLAY_BOXES` of them.
+
+Both files are listed in `.gitignore`, so a deployment's own configuration stays
+out of the repository and one checkout can build any sign.
+
 ### Testing
 
 ```sh
