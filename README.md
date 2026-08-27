@@ -32,10 +32,10 @@
    pip install -r nrf/scripts/requirements.txt
    pip install -r bootloader/mcuboot/scripts/requirements.txt
    ```
-### Recomended
+### Recommended
 - Read the [Zephyr Getting Started Guide](https://docs.zephyrproject.org/latest/develop/getting_started/index.html) to install the required development tools (system packages, Zephyr SDK, and udev rules).
 
-- To save on space, you may want to intall a minimal bundle Zephyr SDK [release](https://github.com/zephyrproject-rtos/sdk-ng/releases) and the arm-zephyr-eabi toolchain. The full release includes all avaiable toolchains.
+- To save on space, you may want to install a minimal bundle Zephyr SDK [release](https://github.com/zephyrproject-rtos/sdk-ng/releases) and the arm-zephyr-eabi toolchain. The full release includes all available toolchains.
 
 - Read the [Introduction to the nRF9160 Feather](https://docs.circuitdojo.com/nrf9160-introduction.html) to better understand the dev board we are using.
 
@@ -44,13 +44,13 @@
 ### Docker
 Zephyr supplies various [Docker images](https://github.com/zephyrproject-rtos/docker-image#zephyr-docker-images) for development.
 
-Our Github Actions [build workflow](https://github.com/umts/embedded-departure-board/blob/main/.github/workflows/build_test.yml) uses the Base Image (ci-base).
+Our GitHub Actions [build workflow](.github/workflows/build.yml) uses the Base Image (ci-base).
 
 
 ## Building
 Currently this build requires a 32 bit [Swiftly](https://www.goswift.ly/) API key placed in `${CMAKE_CURRENT_SOURCE_DIR}/keys/private/swiftly-api.key` (Wrapped in `""`). If that key file does not exist CMake will create it with a fake key to allow the build to succeed.
 
-If you are not using a [pre-signed binary](https://github.com/umts/embedded-departure-board/releases/latest) and you would like a functioning API key, [you can request one here](https://swiftly.zendesk.com/hc/en-us/requests/new?ticket_form_id=33738491027469).
+If you would like a functioning API key, [you can request one here](https://swiftly.zendesk.com/hc/en-us/requests/new?ticket_form_id=33738491027469).
 
 ### Testing
 
@@ -69,7 +69,7 @@ west build --sysbuild ./app -b circuitdojo_feather/nrf9160/ns -- -DFILE_SUFFIX=r
 Flashing the device with an external programmer is quicker than using a bootloader. More importantly, it's the easiest way (and currently the only tested way) to secure the bootloader, update the modem firmware, and use the cortex-debugger.
 
 #### Requirements
-- External programming device, the [nRF5340 Dk](https://www.nordicsemicom/Products/Development-hardware/nRF5340-DK) is what we currently use
+- External programming device, the [nRF5340 DK](https://www.nordicsemi.com/Products/Development-hardware/nRF5340-DK) is what we currently use
 - 6-pin [Tag Connect cable](https://www.tag-connect.com/product/tc2030-ctx-nl-6-pin-no-legs-cable-with-10-pin-micro-connector-for-cortex-processors)
 - [J-Link](https://www.segger.com/downloads/jlink/) software
 - [nRF Util](https://www.nordicsemi.com/Products/Development-tools/nRF-Util)
@@ -98,7 +98,7 @@ newtmgr -c serial image upload ./build/app/zephyr/zephyr.signed.bin
 ```
 
 ## VSCode
-This repo includes `.vscode/tasks.json` to make develpoment easier. The included tasks are:
+This repo includes `.vscode/tasks.json` to make development easier. The included tasks are:
 - Build
 - Load image via bootloader
   - Expects a connection profile named "serial" in `newtmgr`
@@ -112,5 +112,5 @@ This repo includes `.vscode/tasks.json` to make develpoment easier. The included
   - Useful for debugging via AT commands. Use a serial console to send AT commands
 
 ## Creating a Release
-Update the [VERSION file](https://github.com/umts/embedded-departure-board/blob/main/app/VERSION).
-On a successful push to the main branch the [release workflow](https://github.com/umts/embedded-departure-board/blob/main/.github/workflows/release.yml) will; create a new release, generate release notes, and upload the freshly built hex/bin files to the release.
+Update the [VERSION file](app/VERSION).
+On a successful push to the main branch the [release workflow](.github/workflows/release.yml) will create a new release, generate release notes, and upload the freshly built hex/bin files to the release.
