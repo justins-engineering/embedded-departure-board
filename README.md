@@ -84,6 +84,11 @@ west build --sysbuild ./app -b circuitdojo_feather/nrf9160/ns
 west build --sysbuild ./app -b circuitdojo_feather/nrf9160/ns -- -DFILE_SUFFIX=release
 ```
 
+## PidgeIoT integration
+On the `pigeon-integration` branch the board runs as a managed device on the
+PidgeIoT platform, taking its stop and route layout from the platform instead of
+from the build. See [docs/pidgeiot-integration.md](docs/pidgeiot-integration.md).
+
 ## Programming
 ### Flashing
 Flashing the device with an external programmer is quicker than using a bootloader. More importantly, it's the easiest way (and currently the only tested way) to secure the bootloader, update the modem firmware, and use the cortex-debugger.
