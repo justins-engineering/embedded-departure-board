@@ -8,6 +8,9 @@ config LED_DISPLAY_TEST
 #### STOP SETTINGS ####
 config STOP_ID
   string "Bus stop ID"
+  help
+    Identifies one stop, so it has no default here. Set it in the untracked
+    app/prj.local.conf; an unset value fails the build.
 
 config STOP_MAX_ROUTES
   int "Maximum number of routes expected at the configured stop"
@@ -54,7 +57,9 @@ config SWIFTLY_API_HOSTNAME
 
 config SWIFTLY_API_PATH
   string "Swiftly API HTTP path used to retrieve stop predictions data"
-  default "/real-time/pioneer-valley-pvta/predictions"
+  help
+    The path selects a transit agency, so it has no default here. Set it in the
+    untracked app/prj.local.conf; an unset value fails the build.
 
 config SWIFTLY_API_NUMBER_OF_PREDICTIONS
   string "The number of future predictions to return per route/stop in the response"

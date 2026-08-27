@@ -3,8 +3,9 @@ build/
 build_release/
 build_debug/
 
-# Zephyr local conf file
+# Untracked per-sign configuration
 app/prj.local.conf
+app/src/display_boxes.local.h
 
 # Zephyr logs
 log*.txt

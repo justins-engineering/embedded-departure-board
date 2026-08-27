@@ -85,6 +85,12 @@ int update_stop(void) {
   int ret;
   static Stop stop = {.id = CONFIG_STOP_ID};
   static const DisplayBox display_boxes[] = DISPLAY_BOXES;
+  /* Every sweep of the boxes is bounded by the Kconfig count rather than by the
+   * mapping's own length, so a mapping with fewer entries reads past its end. */
+  BUILD_ASSERT(
+      ARRAY_SIZE(display_boxes) == CONFIG_NUMBER_OF_DISPLAY_BOXES,
+      "DISPLAY_BOXES must name exactly CONFIG_NUMBER_OF_DISPLAY_BOXES boxes"
+  );
 
   static char headers_buf[2048];
 

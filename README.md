@@ -32,10 +32,10 @@
    pip install -r nrf/scripts/requirements.txt
    pip install -r bootloader/mcuboot/scripts/requirements.txt
    ```
-### Recomended
+### Recommended
 - Read the [Zephyr Getting Started Guide](https://docs.zephyrproject.org/latest/develop/getting_started/index.html) to install the required development tools (system packages, Zephyr SDK, and udev rules).
 
-- To save on space, you may want to intall a minimal bundle Zephyr SDK [release](https://github.com/zephyrproject-rtos/sdk-ng/releases) and the arm-zephyr-eabi toolchain. The full release includes all avaiable toolchains.
+- To save on space, you may want to install a minimal bundle Zephyr SDK [release](https://github.com/zephyrproject-rtos/sdk-ng/releases) and the arm-zephyr-eabi toolchain. The full release includes all available toolchains.
 
 - Read the [Introduction to the nRF9160 Feather](https://docs.circuitdojo.com/nrf9160-introduction.html) to better understand the dev board we are using.
 
@@ -44,13 +44,33 @@
 ### Docker
 Zephyr supplies various [Docker images](https://github.com/zephyrproject-rtos/docker-image#zephyr-docker-images) for development.
 
-Our Github Actions [build workflow](https://github.com/umts/embedded-departure-board/blob/main/.github/workflows/build_test.yml) uses the Base Image (ci-base).
+Our GitHub Actions [build workflow](.github/workflows/build.yml) uses the Base Image (ci-base).
 
 
 ## Building
 Currently this build requires a 32 bit [Swiftly](https://www.goswift.ly/) API key placed in `${CMAKE_CURRENT_SOURCE_DIR}/keys/private/swiftly-api.key` (Wrapped in `""`). If that key file does not exist CMake will create it with a fake key to allow the build to succeed.
 
-If you are not using a [pre-signed binary](https://github.com/umts/embedded-departure-board/releases/latest) and you would like a functioning API key, [you can request one here](https://swiftly.zendesk.com/hc/en-us/requests/new?ticket_form_id=33738491027469).
+If you would like a functioning API key, [you can request one here](https://swiftly.zendesk.com/hc/en-us/requests/new?ticket_form_id=33738491027469).
+
+### Per-sign configuration
+Which stop a sign serves, whose predictions API it reads, and how that stop's
+routes are laid out across its display boxes all describe one physical sign, so
+they are not tracked here. Supply them from two untracked files before building:
+
+```sh
+cp app/prj.example.conf app/prj.local.conf
+cp app/src/display_boxes.example.h app/src/display_boxes.local.h
+```
+
+Then edit both with the values for the sign being built. `app/prj.local.conf` is
+merged after `app/prj.conf` and `app/sign.conf`, so anything it sets wins.
+`app/src/display_boxes.local.h` defines `DISPLAY_BOXES` with one entry per box,
+and must name exactly `CONFIG_NUMBER_OF_DISPLAY_BOXES` of them.
+
+Both files are listed in `.gitignore`, so a deployment's own configuration stays
+out of the repository and one checkout can build any sign. Neither has a tracked
+fallback: a build without them fails and names the file it wants, rather than
+producing an image that queries another sign's stop.
 
 ### Testing
 
@@ -64,12 +84,17 @@ west build --sysbuild ./app -b circuitdojo_feather/nrf9160/ns
 west build --sysbuild ./app -b circuitdojo_feather/nrf9160/ns -- -DFILE_SUFFIX=release
 ```
 
+## PidgeIoT integration
+On the `pigeon-integration` branch the board runs as a managed device on the
+PidgeIoT platform, taking its stop and route layout from the platform instead of
+from the build. See [docs/pidgeiot-integration.md](docs/pidgeiot-integration.md).
+
 ## Programming
 ### Flashing
 Flashing the device with an external programmer is quicker than using a bootloader. More importantly, it's the easiest way (and currently the only tested way) to secure the bootloader, update the modem firmware, and use the cortex-debugger.
 
 #### Requirements
-- External programming device, the [nRF5340 Dk](https://www.nordicsemicom/Products/Development-hardware/nRF5340-DK) is what we currently use
+- External programming device, the [nRF5340 DK](https://www.nordicsemi.com/Products/Development-hardware/nRF5340-DK) is what we currently use
 - 6-pin [Tag Connect cable](https://www.tag-connect.com/product/tc2030-ctx-nl-6-pin-no-legs-cable-with-10-pin-micro-connector-for-cortex-processors)
 - [J-Link](https://www.segger.com/downloads/jlink/) software
 - [nRF Util](https://www.nordicsemi.com/Products/Development-tools/nRF-Util)
@@ -98,7 +123,7 @@ newtmgr -c serial image upload ./build/app/zephyr/zephyr.signed.bin
 ```
 
 ## VSCode
-This repo includes `.vscode/tasks.json` to make develpoment easier. The included tasks are:
+This repo includes `.vscode/tasks.json` to make development easier. The included tasks are:
 - Build
 - Load image via bootloader
   - Expects a connection profile named "serial" in `newtmgr`
@@ -112,5 +137,11 @@ This repo includes `.vscode/tasks.json` to make develpoment easier. The included
   - Useful for debugging via AT commands. Use a serial console to send AT commands
 
 ## Creating a Release
-Update the [VERSION file](https://github.com/umts/embedded-departure-board/blob/main/app/VERSION).
-On a successful push to the main branch the [release workflow](https://github.com/umts/embedded-departure-board/blob/main/.github/workflows/release.yml) will; create a new release, generate release notes, and upload the freshly built hex/bin files to the release.
+Update the [VERSION file](app/VERSION) and tag the commit.
+
+Releases are not published from CI here. The [build workflow](.github/workflows/build.yml)
+runs on pushes to `main` and on `v*` tags and keeps its output as workflow
+artifacts, but it builds the test profile against the example configuration, so
+those artifacts are a build check rather than something to flash. A release image
+is built locally with the signing key and the sign's own configuration, per
+[Release](#release) above.
