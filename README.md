@@ -836,6 +836,14 @@ the substitution cannot change how any real log line decodes: the 200
 archived chunks in `feather-0.13.6-train-2026-08-17` decode to the same
 674 lines against the raw and the sanitized file.
 
+The conf form above is the standard step, because it redacts a value it
+can name. For an archived dictionary whose build credential is no longer
+on hand, `--legacy --expect N` redacts by shape instead: a whole
+`string_mappings` value that is an 88 to 96 character `[A-Za-z0-9_-]`
+run, refusing unless it finds exactly N of them. The match is anchored
+whole-value, so the endpoint string carrying a 64-hex pigeon id cannot be
+caught by it.
+
 ### FOTA (task #3)
 
 Shadow `firmware` target → chunked (1KiB) device-authed Range download

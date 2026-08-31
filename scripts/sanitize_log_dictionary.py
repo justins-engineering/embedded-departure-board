@@ -7,6 +7,7 @@ token in log_dictionary.json. Decoding is keyed by address, so replacing the
 value leaves every real log line decodable.
 
 Usage: sanitize_log_dictionary.py <log_dictionary.json> <prj.local.conf> [-o OUT]
+       sanitize_log_dictionary.py <log_dictionary.json> --legacy --expect N [-o OUT]
 """
 
 import argparse
@@ -17,9 +18,12 @@ from pathlib import Path
 
 REDACTED = "<redacted device credential>"
 TOKEN_LINE = re.compile(r'^\s*CONFIG_PIGEON_TOKEN\s*=\s*"(.+)"\s*$')
-# A platform device token's shape. One surviving the pass means a copy was
-# missed, whichever conf we were handed.
-CREDENTIAL_RUN = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{88,96}(?![A-Za-z0-9_-])")
+# A platform device token's shape. Matched whole-value in --legacy mode, so an
+# endpoint URL carrying a 64-hex pigeon id cannot be mistaken for one.
+SHAPE = r"[A-Za-z0-9_-]{88,96}"
+CREDENTIAL_VALUE = re.compile(SHAPE)
+# One of these surviving anywhere in the output means a copy was missed.
+CREDENTIAL_RUN = re.compile(r"(?<![A-Za-z0-9_-])" + SHAPE + r"(?![A-Za-z0-9_-])")
 
 
 def fail(message):
@@ -35,31 +39,49 @@ def read_token(conf):
   fail("no CONFIG_PIGEON_TOKEN in " + str(conf))
 
 
+def redact(mappings, token):
+  """Redact by known value, or by shape when the build's credential is gone."""
+  count = 0
+  for address, value in mappings.items():
+    hit = token in value if token else CREDENTIAL_VALUE.fullmatch(value)
+    if hit:
+      mappings[address] = REDACTED
+      count += 1
+  return count
+
+
 def main():
   parser = argparse.ArgumentParser(description="Redact a device token from a log dictionary.")
   parser.add_argument("dictionary", type=Path, help="log_dictionary.json to sanitize")
-  parser.add_argument("conf", type=Path, help="prj.local.conf holding CONFIG_PIGEON_TOKEN")
+  parser.add_argument("conf", type=Path, nargs="?", help="prj.local.conf holding the token")
   parser.add_argument("-o", "--output", type=Path, help="default: <dictionary>.sanitized.json")
+  parser.add_argument("--legacy", action="store_true",
+                      help="redact by shape, for a build whose credential is no longer on hand")
+  parser.add_argument("--expect", type=int, help="exact number of values --legacy must redact")
   args = parser.parse_args()
 
-  token = read_token(args.conf)
+  if args.legacy:
+    if args.conf is not None or args.expect is None or args.expect < 1:
+      fail("--legacy takes --expect N (N >= 1) and no conf")
+  elif args.conf is None:
+    fail("a conf is required unless --legacy is given")
+
+  token = None if args.legacy else read_token(args.conf)
   database = json.loads(args.dictionary.read_text(encoding="utf-8"))
   mappings = database.get("string_mappings")
   if not isinstance(mappings, dict):
     fail("no string_mappings object in " + str(args.dictionary))
 
-  redacted = 0
-  for address, value in mappings.items():
-    if token in value:
-      mappings[address] = REDACTED
-      redacted += 1
+  redacted = redact(mappings, token)
+  if args.legacy and redacted != args.expect:
+    fail("redacted " + str(redacted) + " values, expected exactly " + str(args.expect))
   if not redacted:
     fail("token absent from " + str(args.dictionary) + "; wrong conf for this build?")
 
   # Same serialization as database_gen.py, so the file differs only by the value.
   # Verified before it is written, so a failed check never leaves a file to upload.
   payload = json.dumps(database)
-  if token in payload:
+  if token and token in payload:
     fail("token survives the redaction")
   survivors = len(CREDENTIAL_RUN.findall(payload))
   if survivors:
