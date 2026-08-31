@@ -826,6 +826,24 @@ the pigeon's Log Viewer and upload that file (platform task #5, live as of
 inline with a "Decoded .txt" download; re-upload after every reflash).
 Host-side alternative: `zephyr/scripts/logging/dictionary/log_parser.py`.
 
+**Sanitize before uploading.** `database_gen.py` collects the image's
+whole static rodata string pool so that `%s` pointers resolve, so
+`CONFIG_PIGEON_TOKEN` lands in `string_mappings` verbatim, and an
+uploaded dictionary is readable by every member of the org. Run
+`scripts/sanitize_log_dictionary.py <dictionary> app/prj.local.conf` and
+upload the `.sanitized.json` it writes. Decoding is keyed by address, so
+the substitution cannot change how any real log line decodes: the 200
+archived chunks in `feather-0.13.6-train-2026-08-17` decode to the same
+674 lines against the raw and the sanitized file.
+
+The conf form above is the standard step, because it redacts a value it
+can name. For an archived dictionary whose build credential is no longer
+on hand, `--legacy --expect N` redacts by shape instead: a whole
+`string_mappings` value that is an 88 to 96 character `[A-Za-z0-9_-]`
+run, refusing unless it finds exactly N of them. The match is anchored
+whole-value, so the endpoint string carrying a 64-hex pigeon id cannot be
+caught by it.
+
 ### FOTA (task #3)
 
 Shadow `firmware` target → chunked (1KiB) device-authed Range download
