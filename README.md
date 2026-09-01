@@ -677,20 +677,33 @@ a TLS stack, or a watchdog window with PidgeIoT:
   starved every lower-priority thread (this was also silently blocking any
   deferred-mode logging from ever flushing).
 
-#### CA rotation survivability (trust bundles, 2026-08-02)
+#### CA rotation survivability (trust bundles)
 
 Both TLS paths carry multi-root PEM bundles so a CA rotation at renewal
-is not an automatic outage. What each image can actually verify TODAY
-(from the built `.config`, not the datasheet):
+is not an automatic outage. What each image can actually verify (from
+the built `.config`, not the datasheet):
 
-| Path | Bundle (`keys/public/`) | Usable today | Inert until config change |
-|---|---|---|---|
-| Pigeon (modem TLS, sec tag 2) | `pigeon-ca.crt`: GTS R4, ISRG X1, ISRG X2 | **all three** (modem has RSA + P-256 + P-384) | — |
-| Swiftly (native mbedTLS, sec tag 1) | Active: `AmazonRootCA3.cer` = **Amazon Root CA 3 only, as DER** (the efficient native-side encoding, by directive — 442B credential, no PEM parser in the image; PEM parsing was enabled briefly 2026-08-02 for a PEM anchor and deliberately reverted). Full published ATS set staged in `swiftly-ca-full.crt` (PEM, CA 1–4 + Starfield G2, SPKI-verified against amazontrust.com), NOT compiled in | Amazon CA 3 (image has ECDHE_ECDSA + P-256 + SHA-256 only) | Activating the full set is a PACKAGE, not a file swap. Always required: the crypto enablement — RSA (`MBEDTLS_RSA_C`/PSA RSA + ECDHE_RSA) and/or `SECP_R1_384`+`SHA_384` — because the socket's sec-tag check parses every root at setup and one UNPARSEABLE root bricks all Swiftly fetches (bench-verified). Then pick a trust-store form, eyes open: **(A) PEM bundle** — one concatenated credential, needs `CONFIG_MBEDTLS_PEM_PARSE_C` back, and the protected-storage caps (2KB/asset, 8KB partition, bench-verified) force the volatile credential backend or a bigger PS partition; **(B) one DER per sec tag** — no PEM parser (mbedTLS cannot parse concatenated DER in one credential, which is why the bundle is PEM), each root its own credential well under the 2KB/asset cap with a `sec_tag_list` on the socket (see `tls_setup()`), but the 8KB PS partition bounds how many roots fit (~4–5 with overhead + TOC) |
+| Path | Bundle (`keys/public/`) | Verifiable |
+|---|---|---|
+| Pigeon (modem TLS, sec tag 2) | `pigeon-ca.crt`: GTS R4, ISRG X1, ISRG X2 | **all three** (modem has RSA + P-256 + P-384) |
+| Swiftly (native mbedTLS, sec tag 1) | `swiftly-ca-full.crt`: the complete published ATS set — Amazon Root CA 1 (RSA-2048), CA 2 (RSA-4096), CA 3 (P-256), CA 4 (P-384), Starfield Services G2 (RSA-2048); every SPKI verified against amazontrust.com/repository | **all five** (image has ECDHE_ECDSA + ECDHE_RSA, P-256/P-384, SHA-256/384, RSA verify at 2048/4096) |
 
-So: a Cloudflare CA switch on the PidgeIoT side is a non-event; an Amazon
-switch away from CA 3 (to RSA or P-384) still needs a Kconfig/TF-M crypto
-change — but only that, the trust store is already ready. No GTS root in
+Load-bearing details of the Swiftly form, learned the hard way: the
+socket's sec-tag check parses every root at setup and one UNPARSEABLE
+root bricks all Swiftly fetches, so every root in the bundle must stay
+covered by the built crypto; the bundle is PEM because mbedTLS cannot
+parse concatenated DER in one credential; the credential backend is
+VOLATILE because the protected-storage backend persists the first-ever
+credential (`-EEXIST` = success), which would pin a FOTA'd device to the
+anchors it shipped with — and its 2KB asset cap cannot hold the bundle
+anyway. RSA-4096 wants a 0x4000 TF-M crypto stack by default, which does
+not fit TF-M's SRAM; it is pinned at 0x2000, safe for the verify-only
+workload (see the board conf comment). Per-root forced-chain checks run
+against Amazon's own test hosts `good.sca0a..sca4a.amazontrust.com`
+(0 = Starfield G2, 1–4 = CA 1–4).
+
+So: a Cloudflare CA switch on the PidgeIoT side is a non-event, and so
+is any Amazon rotation within its published root set. No GTS root in
 the Swiftly bundle: no CT or documentation evidence was found that
 api.goswift.ly ever served a Google chain (checked 2026-08-02; crt.sh was
 down, Google CT API retired, web search clean — re-check crt.sh if this
@@ -990,9 +1003,8 @@ Post-OTA soak: ~31h, 1513 telemetry reports at unbroken cadence.
 5. Upstream filings worth making: the TF-M `TFM_LOG_LEVEL_SILENCE`
    boot-kill (minimal repro exists: single-flag A/B on this board) and
    pigeon's chunk-yield rationale.
-6. Swiftly full ATS trust-set activation is a documented package (see
-   the rotation table): crypto enablement + volatile credential backend
-   or bigger PS partition.
+6. ~~Swiftly full ATS trust-set activation~~ CLOSED: the full five-root
+   set is compiled in and verifiable (see the rotation table).
 7. Release-profile console shows only WRN+ — fine for the field;
    `LOG_DEFAULT_LEVEL=3` needs the log-thread stack raised to 2048 in
    the same change if ever wanted.
