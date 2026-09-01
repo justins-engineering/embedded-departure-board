@@ -22,36 +22,21 @@
 
 LOG_MODULE_REGISTER(lte_manager);
 
-/* Swiftly trust anchor: Amazon Root CA 3 (ECDSA P-256), as DER -- the
- * original AmazonRootCA3.cer bytes (fingerprint-verified 18:CE:6C:FE...),
- * DER by directive: it is the efficient native-side encoding (442B vs
- * 656B PEM as the TF-M protected-storage credential, no base64 decode at
- * parse), and mbedTLS takes it via the no-copy DER parse path. This is
- * ALSO the maximal set this image can load, not a minimal choice -- see
- * below. PEM remains mandatory on the MODEM side (pigeon-ca.crt): %CMNG
- * rejects DER, the exact opposite preference, learned live.
- *
- * The complete published Amazon Trust Services rotation set (CA 1/2/3/4
- * + Starfield G2, every SPKI verified against amazontrust.com/repository)
- * is staged in keys/public/swiftly-ca-full.crt but deliberately NOT
- * compiled in: sockets_tls.c's tls_opt_sec_tag_list_set() runs
- * tls_check_cert() -> mbedtls parse over every credential at socket
- * setup, strictly (any nonzero parse result -> EINVAL fails the whole
- * tag), and this build has no RSA (no MBEDTLS_RSA_C/PSA RSA) and no
- * P-384/SHA-384 -- CA 1/2/4/SFSG2 are UNPARSEABLE here, and one
- * unparseable root kills every Swiftly fetch (hit live 2026-08-02 as a
- * boot-time day-job outage). Activating the full set is a PACKAGE:
- * the crypto enablement (RSA + ECDHE_RSA suites; SECP_R1_384 + SHA_384
- * via TF-M) PLUS one of the two trust-store forms in the README's
- * rotation-table recipe -- the PEM bundle (needs MBEDTLS_PEM_PARSE_C,
- * which was enabled briefly on 2026-08-02 and deliberately reverted
- * with this DER anchor) or one-DER-per-sec-tag (no PEM parser, but one
- * PS credential per root). api.goswift.ly's live chain (leaf <- Amazon
- * ECDSA 256 M01 <- Amazon Root CA 3, verified 2026-08-02) verifies
- * against this anchor. No GTS root anywhere: no CT/doc evidence Swiftly
- * ever served a Google chain. */
+/* Swiftly trust anchors: the complete published Amazon Trust Services set
+ * (Root CA 1/2/3/4 + Starfield Services G2, each SPKI verified against
+ * amazontrust.com/repository) as one PEM bundle in ONE CA-chain
+ * credential. api.goswift.ly sits behind AWS, which rotates the served
+ * chain among those roots without notice -- a single-root anchor turns an
+ * ECDSA/RSA flip into a fleet outage until the chain flips back. Every
+ * root here must be parseable by the built crypto (RSA 2048/4096,
+ * P-256/P-384, SHA-256/384 -- board conf): sockets_tls parses every
+ * credential at socket setup, strictly, and one unparseable root fails
+ * the whole tag. PEM because mbedTLS cannot parse concatenated DER in
+ * one credential; PEM on the MODEM side too (pigeon-ca.crt), where %CMNG
+ * rejects DER. No GTS root: no CT/doc evidence Swiftly ever served a
+ * Google chain. */
 static const char swiftly_cert[] = {
-#include "AmazonRootCA3.cer.hex"
+#include "swiftly-ca-full.crt.hex"
     // Null terminate certificate if running Mbed TLS
     IF_ENABLED(CONFIG_TLS_CREDENTIALS, (0x00))
 };
